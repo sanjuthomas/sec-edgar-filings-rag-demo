@@ -200,6 +200,7 @@ services:
       KAFKA_TOPIC: filings
       KAFKA_GROUP_ID: edgar-pgvector-etl
       KAFKA_AUTO_OFFSET_RESET: earliest
+      ALLOWED_FORMS: '["10-K","10-Q","10-K/A","10-Q/A","8-K","8-K/A"]'
     volumes:
       - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar:ro
 
@@ -270,7 +271,7 @@ services:
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: filing_chunks
       EDGAR_DATA_DIR: /data/edgar
-      ALLOWED_FORMS: '["10-K","10-Q","10-K/A","10-Q/A"]'
+      ALLOWED_FORMS: '["10-K","10-Q","10-K/A","10-Q/A","8-K","8-K/A"]'
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: filings
       KAFKA_GROUP_ID: edgar-qdrant-etl
