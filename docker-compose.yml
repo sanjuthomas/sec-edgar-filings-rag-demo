@@ -1,0 +1,159 @@
+# SEC EDGAR filings → pgvector → semantic search RAG demo
+#
+# Orchestrates published images only — no application source in this repo.
+#
+# Prerequisites:
+#   - Transcend drive mounted at /Volumes/Transcend
+#   - Docker Desktop file sharing enabled for /Volumes (macOS)
+#   - Ollama running on the host (http://localhost:11434)
+#   - SEC_USER_AGENT set in .env
+#
+# Start the full stack:
+#   docker compose up -d
+#
+# Include Kafka debug UI (port 8081):
+#   docker compose --profile debug up -d
+
+services:
+  # --- 1. sec-edgar-filings (producer: MongoDB + Kafka + downloader API) ---
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - /Volumes/Transcend/mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  kafka:
+    image: apache/kafka:3.9.0
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+    volumes:
+      - /Volumes/Transcend/kafka-data:/tmp/kraft-combined-logs
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  sec-edgar-filings:
+    image: sanjuthomas/sec-edgar-filings:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SEC_USER_AGENT: "${SEC_USER_AGENT:-sec-edgar-filings/0.2 (contact: set SEC_USER_AGENT in .env)}"
+      MONGO_URI: mongodb://mongo:27017
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ENABLED: "true"
+      EDGAR_DOWNLOAD_BASE: /Volumes/Transcend/edgar
+    volumes:
+      - /Volumes/Transcend/edgar:/Volumes/Transcend/edgar
+    ports:
+      - "8080:8080"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # --- 2. sec-edgar-filings-to-pgvector (pgvector + Kafka consumer / ETL) ---
+
+  pgvector:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: edgar
+    ports:
+      - "5433:5432"
+    volumes:
+      - /Volumes/Transcend/pgvector-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d edgar"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  sec-edgar-filings-to-pgvector:
+    image: sanjuthomas/sec-edgar-filings-to-pgvector:latest
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      pgvector:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@pgvector:5432/edgar
+      EDGAR_DATA_DIR: /Volumes/Transcend/edgar
+      ALLOWED_FORMS: 10-K,10-Q,10-K/A,10-Q/A
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: sec_edgar_filings
+      MONGO_FILING_METADATA_COLLECTION: filing_metadata
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: filings
+      KAFKA_GROUP_ID: edgar-pgvector-etl
+      KAFKA_AUTO_OFFSET_RESET: earliest
+    volumes:
+      - /Volumes/Transcend/edgar:/Volumes/Transcend/edgar:ro
+
+  # --- 3. semantic search UI (pgvector + Ollama on host) ---
+
+  sec-edgar-filings-semantic-search-ui:
+    image: sanjuthomas/sec-edgar-filings-semantic-search-ui:latest
+    restart: unless-stopped
+    ports:
+      - "8095:8095"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://pgvector:5432/edgar
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_AI_OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      pgvector:
+        condition: service_healthy
+
+  # --- 4. Kafka debug UI (optional) ---
+
+  kafka-web-clients:
+    profiles: ["debug"]
+    image: sanjuthomas/kafka-web-clients:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
