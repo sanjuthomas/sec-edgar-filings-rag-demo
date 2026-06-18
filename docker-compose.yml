@@ -1,9 +1,9 @@
-# SEC EDGAR filings → pgvector → semantic search RAG demo
+# SEC EDGAR filings → pgvector + Qdrant → semantic search RAG demo
 #
 # Orchestrates published images only — no application source in this repo.
 #
 # Set host data directories in .env (or pass env vars when starting):
-#   EDGAR_HOST_PATH, MONGO_HOST_PATH, KAFKA_HOST_PATH, PGVECTOR_HOST_PATH
+#   EDGAR_HOST_PATH, MONGO_HOST_PATH, KAFKA_HOST_PATH, PGVECTOR_HOST_PATH, QDRANT_HOST_PATH
 #
 # Prerequisites:
 #   - Ollama running on the host (http://localhost:11434)
@@ -15,20 +15,22 @@
 # Include Kafka debug UI (host port 18081):
 #   docker compose --profile debug up -d
 #
-# Host ports (all > 10000): mongo 10017, kafka 10092, pgvector 10432,
-#   filings crawler 18080, pgvector search UI 18000, RAG UI 18095, kafka debug 18081
+# Host ports (all > 10000): mongo 10017, kafka 10092, pgvector 10432, qdrant 16333/16334,
+#   filings crawler 18080, pgvector search UI 18000, qdrant search UI 18002, RAG UI 18095,
+#   kafka debug 18081
 
 services:
   init-dirs:
     image: alpine:3.21
     restart: "no"
     entrypoint: ["/bin/sh", "-c"]
-    command: ["mkdir -p /edgar /mongo /kafka /pgvector"]
+    command: ["mkdir -p /edgar /mongo /kafka /pgvector /qdrant"]
     volumes:
       - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/edgar
       - ${MONGO_HOST_PATH:-./sec-edgar/mongo-data}:/mongo
       - ${KAFKA_HOST_PATH:-./sec-edgar/kafka-data}:/kafka
       - ${PGVECTOR_HOST_PATH:-./sec-edgar/pgvector-data}:/pgvector
+      - ${QDRANT_HOST_PATH:-./sec-edgar/qdrant-data}:/qdrant
 
   # --- 1. sec-edgar-filings-crawler (producer: MongoDB + Kafka + downloader API) ---
 
@@ -217,7 +219,83 @@ services:
       - "18000:8000"
     command: ["edgar-etl", "serve", "--host", "0.0.0.0", "--port", "8000"]
 
-  # --- 3. semantic search UI (pgvector + Ollama on host) ---
+  # --- 3. sec-edgar-filings-to-qdrant (Qdrant + Kafka consumer / ETL) ---
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
+    ports:
+      - "16333:6333"
+      - "16334:6334"
+    volumes:
+      - ${QDRANT_HOST_PATH:-./sec-edgar/qdrant-data}:/qdrant/storage
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "timeout 1 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/6333' || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  init-qdrant:
+    image: sanjuthomas/sec-edgar-filings-to-qdrant:latest
+    restart: "no"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: filing_chunks
+    entrypoint: ["edgar-etl", "init-collection"]
+
+  sec-edgar-filings-to-qdrant:
+    image: sanjuthomas/sec-edgar-filings-to-qdrant:latest
+    restart: unless-stopped
+    depends_on:
+      init-qdrant:
+        condition: service_completed_successfully
+      init-kafka:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: filing_chunks
+      EDGAR_DATA_DIR: /data/edgar
+      ALLOWED_FORMS: '["10-K","10-Q","10-K/A","10-Q/A"]'
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: filings
+      KAFKA_GROUP_ID: edgar-qdrant-etl
+      KAFKA_AUTO_OFFSET_RESET: earliest
+    volumes:
+      - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar:ro
+
+  sec-edgar-filings-to-qdrant-search:
+    image: sanjuthomas/sec-edgar-filings-to-qdrant:latest
+    restart: unless-stopped
+    depends_on:
+      init-qdrant:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_healthy
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: filing_chunks
+      EMBEDDING_MODEL: BAAI/bge-small-en-v1.5
+      LOG_LEVEL: INFO
+    ports:
+      - "18002:8000"
+    command: ["edgar-etl", "serve", "--host", "0.0.0.0", "--port", "8000"]
+
+  # --- 4. semantic search UI (pgvector + Ollama on host) ---
 
   sec-edgar-filings-semantic-search-ui:
     image: sanjuthomas/sec-edgar-filings-semantic-search-ui:latest
@@ -237,7 +315,7 @@ services:
       pgvector:
         condition: service_healthy
 
-  # --- 4. Kafka debug UI (optional) ---
+  # --- 5. Kafka debug UI (optional) ---
 
   kafka-web-clients:
     profiles: ["debug"]
