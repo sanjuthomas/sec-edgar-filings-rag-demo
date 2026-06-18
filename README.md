@@ -14,9 +14,9 @@ SEC annual and quarterly reports (10-K, 10-Q) are rich sources of corporate info
 2. **Indexing** filing text as vector embeddings in PostgreSQL with pgvector
 3. **Querying** with semantic search and generating grounded answers that cite the source passages
 
-All heavy lifting lives in sibling repositories ([sec-edgar-filings](https://github.com/sanjuthomas/sec-edgar-filings), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui)). **This repository is the glue** — one `docker compose up` to run the full stack on a Mac with a Transcend external drive and Ollama installed locally.
+All heavy lifting lives in sibling repositories ([sec-edgar-filings](https://github.com/sanjuthomas/sec-edgar-filings), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui)). **This repository is the glue** — one `docker compose up` to run the full stack with Docker and Ollama installed locally.
 
-Persistent data (filings, MongoDB, Kafka, pgvector) is stored on `/Volumes/Transcend`. The LLM runs on the host via Ollama, not in a container.
+Persistent data (filings, MongoDB, Kafka, pgvector) is stored in **host directories you choose** (defaults to `./data/` under this repo). The LLM runs on the host via Ollama, not in a container.
 
 ## What it does
 
@@ -57,22 +57,13 @@ flowchart LR
 
 - **Docker Desktop** (or Docker Engine + Compose v2)
 - **Apple Silicon / arm64** — all custom images publish `linux/arm64` manifests
-- **Transcend drive** mounted at `/Volumes/Transcend`
-- **macOS file sharing** — Docker Desktop → Settings → Resources → File sharing → include `/Volumes`
 - **Ollama** running on the host with a chat model (UI default: `qwen3:14b`)
 
 ```bash
 ollama list
 ```
 
-Create data directories on first run if they do not exist:
-
-```bash
-mkdir -p /Volumes/Transcend/edgar \
-         /Volumes/Transcend/mongo-data \
-         /Volumes/Transcend/kafka-data \
-         /Volumes/Transcend/pgvector-data
-```
+If you use paths outside your home directory (for example an external drive on macOS), ensure Docker can access them: Docker Desktop → Settings → Resources → File sharing.
 
 ## Quick start
 
@@ -81,9 +72,22 @@ git clone https://github.com/sanjuthomas/sec-edgar-filings-rag-demo.git
 cd sec-edgar-filings-rag-demo
 
 cp .env.example .env
-# Edit .env — SEC requires a real name + email in SEC_USER_AGENT
+# Edit .env — set SEC_USER_AGENT and optionally override data directory paths
+
+# Create default data directories (skip if you changed paths in .env — mkdir those instead)
+mkdir -p data/edgar data/mongo-data data/kafka-data data/pgvector-data
 
 docker compose pull
+docker compose up -d
+```
+
+Or pass paths inline without editing `.env`:
+
+```bash
+EDGAR_HOST_PATH=$HOME/sec-edgar/edgar \
+MONGO_HOST_PATH=$HOME/sec-edgar/mongo-data \
+KAFKA_HOST_PATH=$HOME/sec-edgar/kafka-data \
+PGVECTOR_HOST_PATH=$HOME/sec-edgar/pgvector-data \
 docker compose up -d
 ```
 
@@ -138,25 +142,33 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 
 Startup order is enforced with healthchecks: MongoDB and Kafka become healthy first, then the downloader API; pgvector must be healthy before the ETL consumer and UI start.
 
-## Host data paths
+## Data directories
 
-Bind mounts are hard-coded to the Transcend drive:
+Host paths are configured with environment variables. Defaults are under `./data/` in this repo.
 
-| Host path | Used by |
-|-----------|---------|
-| `/Volumes/Transcend/edgar` | Downloaded filing `.htm` files (read-write for downloader, read-only for ETL) |
-| `/Volumes/Transcend/mongo-data` | MongoDB data |
-| `/Volumes/Transcend/kafka-data` | Kafka broker logs |
-| `/Volumes/Transcend/pgvector-data` | PostgreSQL / pgvector data |
+| Variable | Default | Mounted in container as | Used by |
+|----------|---------|-------------------------|---------|
+| `EDGAR_HOST_PATH` | `./data/edgar` | `/data/edgar` | Filing `.htm` files (read-write for downloader, read-only for ETL) |
+| `MONGO_HOST_PATH` | `./data/mongo-data` | `/data/db` | MongoDB data |
+| `KAFKA_HOST_PATH` | `./data/kafka-data` | `/tmp/kraft-combined-logs` | Kafka broker logs |
+| `PGVECTOR_HOST_PATH` | `./data/pgvector-data` | `/var/lib/postgresql/data` | PostgreSQL / pgvector data |
 
-The EDGAR mount target **inside containers is the same path** (`/Volumes/Transcend/edgar`) so `local_path` values in MongoDB and Kafka events match files on disk.
+Filing metadata in MongoDB stores `local_path` values under `/data/edgar/...` (the in-container mount). Both the downloader and ETL use that same container path, so your host path can be anywhere.
+
+Set paths in `.env` or export them before `docker compose up`. Relative paths are resolved from the directory containing `docker-compose.yml`.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and set:
+Copy `.env.example` to `.env` and edit as needed:
 
 ```bash
 SEC_USER_AGENT=Your Name your.email@example.com
+
+# Optional — override defaults
+EDGAR_HOST_PATH=./data/edgar
+MONGO_HOST_PATH=./data/mongo-data
+KAFKA_HOST_PATH=./data/kafka-data
+PGVECTOR_HOST_PATH=./data/pgvector-data
 ```
 
 The SEC requires a descriptive `User-Agent` on every programmatic request. A placeholder is used if unset, which may lead to throttling.
@@ -206,8 +218,8 @@ curl http://localhost:8080/api/filings/GS
 
 | Symptom | Check |
 |---------|-------|
-| Downloader can't write filings | Transcend mounted? `/Volumes` shared in Docker Desktop? |
-| ETL skips filings | File exists at `local_path` in MongoDB under `/Volumes/Transcend/edgar`? |
+| Downloader can't write filings | Does `EDGAR_HOST_PATH` exist? Is the path shared with Docker (File sharing on macOS)? |
+| ETL skips filings | File exists at `local_path` from MongoDB under `/data/edgar` inside containers? |
 | UI returns no results | ETL logs show chunks loaded? `docker compose logs sec-edgar-filings-to-pgvector` |
 | UI errors on answer generation | Ollama running? `curl http://localhost:11434/api/tags` |
 | Kafka debug can't connect | Use `kafka:9092` (not `localhost:9092`) from the debug container |
