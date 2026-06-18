@@ -84,7 +84,7 @@ docker compose up -d
 Or pass paths inline without editing `.env`:
 
 ```bash
-EDGAR_HOST_PATH=$HOME/sec-edgar/edgar \
+EDGAR_HOST_PATH=$HOME/sec-edgar/filings-data \
 MONGO_HOST_PATH=$HOME/sec-edgar/mongo-data \
 KAFKA_HOST_PATH=$HOME/sec-edgar/kafka-data \
 PGVECTOR_HOST_PATH=$HOME/sec-edgar/pgvector-data \
