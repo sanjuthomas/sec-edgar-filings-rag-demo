@@ -14,7 +14,7 @@ SEC annual and quarterly reports (10-K, 10-Q) are rich sources of corporate info
 2. **Indexing** filing text as vector embeddings in PostgreSQL with pgvector
 3. **Querying** with semantic search and generating grounded answers that cite the source passages
 
-All heavy lifting lives in sibling repositories ([sec-edgar-filings](https://github.com/sanjuthomas/sec-edgar-filings), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui)). **This repository is the glue** — one `docker compose up` to run the full stack with Docker and Ollama installed locally.
+All heavy lifting lives in sibling repositories ([sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui)). **This repository is the glue** — one `docker compose up` to run the full stack with Docker and Ollama installed locally.
 
 Persistent data (filings, MongoDB, Kafka, pgvector) is stored in **host directories you choose** (defaults to `./sec-edgar/` under this repo). The LLM runs on the host via Ollama, not in a container.
 
@@ -22,7 +22,7 @@ Persistent data (filings, MongoDB, Kafka, pgvector) is stored in **host director
 
 | Step | Component | Role |
 |------|-----------|------|
-| 1 | [sec-edgar-filings](https://github.com/sanjuthomas/sec-edgar-filings) | Downloads filings from SEC EDGAR, stores metadata in MongoDB, writes `.htm` files to disk, publishes Kafka events; **Admin** and **Browse** web UIs on port **18080** |
+| 1 | [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) | Downloads filings from SEC EDGAR, stores metadata in MongoDB, writes `.htm` files to disk, publishes Kafka events; **Admin** and **Browse** web UIs on port **18080** |
 | 2 | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | Consumes the `filings` Kafka topic, reads filing content from disk, generates embeddings, loads pgvector |
 | 3 | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | Semantic search + RAG answers over pgvector, using Ollama on your Mac for generation |
 | 4 | [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | Optional browser UI to inspect Kafka messages (debug) |
@@ -31,7 +31,7 @@ Persistent data (filings, MongoDB, Kafka, pgvector) is stored in **host director
 
 ```mermaid
 flowchart LR
-    SEC["SEC EDGAR"] --> API["sec-edgar-filings"]
+    SEC["SEC EDGAR"] --> API["sec-edgar-filings-crawler"]
     API --> Mongo[("MongoDB")]
     API --> Kafka[["filings topic"]]
     API --> Disk["EDGAR files on disk"]
@@ -130,13 +130,13 @@ docker compose logs -f sec-edgar-filings-to-pgvector
 
 ```bash
 # Refresh S&P 500 ticker universe in MongoDB
-docker compose run --rm sec-edgar-filings python -m app.jobs.refresh_sp500
+docker compose run --rm sec-edgar-filings-crawler python -m app.jobs.refresh_sp500
 
 # Download recent filings (publishes to Kafka as each filing is registered)
-docker compose run --rm sec-edgar-filings python -m app.jobs.download_sp500
+docker compose run --rm sec-edgar-filings-crawler python -m app.jobs.download_sp500
 
 # Shorter lookback for a quicker demo
-docker compose run --rm sec-edgar-filings python -m app.jobs.download_sp500 -- --lookback-days 30 -v
+docker compose run --rm sec-edgar-filings-crawler python -m app.jobs.download_sp500 -- --lookback-days 30 -v
 ```
 
 Watch ETL progress:
@@ -158,7 +158,7 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 |-----------------|-------|-----------|-------|
 | `init-dirs` | `alpine:3.21` | — | Creates host data directories on first start |
 | `init-db` | `pgvector/pgvector:pg17` | — | Creates pgvector tables on first start (`sql/001_init.sql`) |
-| `sec-edgar-filings` | `sanjuthomas/sec-edgar-filings:latest` | **18080** | Filings Admin UI, Browse UI, REST API |
+| `sec-edgar-filings-crawler` | `sanjuthomas/sec-edgar-filings-crawler:latest` | **18080** | Filings Admin UI, Browse UI, REST API |
 | `mongo` | `mongo:7` | **10017** | Filing metadata |
 | `kafka` | `apache/kafka:3.9.0` | **10092** | `filings` topic |
 | `pgvector` | `pgvector/pgvector:pg17` | **10432** | DB `edgar`, user `postgres` |
@@ -237,7 +237,7 @@ docker compose --profile debug down
 
 # Logs
 docker compose logs -f
-docker compose logs -f sec-edgar-filings sec-edgar-filings-to-pgvector
+docker compose logs -f sec-edgar-filings-crawler sec-edgar-filings-to-pgvector
 
 # Pull latest images
 docker compose pull && docker compose up -d
@@ -261,7 +261,7 @@ curl http://localhost:18080/api/browse/GS
 
 | Project | Docker Hub |
 |---------|------------|
-| [sec-edgar-filings](https://github.com/sanjuthomas/sec-edgar-filings) | [`sanjuthomas/sec-edgar-filings`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings) |
+| [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) | [`sanjuthomas/sec-edgar-filings-crawler`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-crawler) |
 | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | [`sanjuthomas/sec-edgar-filings-to-pgvector`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-to-pgvector) |
 | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | [`sanjuthomas/sec-edgar-filings-semantic-search-ui`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-semantic-search-ui) |
 | [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | [`sanjuthomas/kafka-web-clients`](https://hub.docker.com/r/sanjuthomas/kafka-web-clients) |

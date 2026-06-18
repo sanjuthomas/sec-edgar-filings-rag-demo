@@ -30,7 +30,7 @@ services:
       - ${KAFKA_HOST_PATH:-./sec-edgar/kafka-data}:/kafka
       - ${PGVECTOR_HOST_PATH:-./sec-edgar/pgvector-data}:/pgvector
 
-  # --- 1. sec-edgar-filings (producer: MongoDB + Kafka + downloader API) ---
+  # --- 1. sec-edgar-filings-crawler (producer: MongoDB + Kafka + downloader API) ---
 
   mongo:
     image: mongo:7
@@ -84,14 +84,14 @@ services:
       retries: 5
       start_period: 30s
 
-  sec-edgar-filings:
-    image: sanjuthomas/sec-edgar-filings:latest
+  sec-edgar-filings-crawler:
+    image: sanjuthomas/sec-edgar-filings-crawler:latest
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     environment:
-      SEC_USER_AGENT: "${SEC_USER_AGENT:-sec-edgar-filings/0.2 (contact: set SEC_USER_AGENT in .env)}"
+      SEC_USER_AGENT: "${SEC_USER_AGENT:-sec-edgar-filings-crawler/0.2 (contact: set SEC_USER_AGENT in .env)}"
       MONGO_URI: mongodb://mongo:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLED: "true"
