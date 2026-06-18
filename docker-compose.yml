@@ -24,7 +24,7 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - ${MONGO_HOST_PATH:-./data/mongo-data}:/data/db
+      - ${MONGO_HOST_PATH:-./sec-edgar/mongo-data}:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
@@ -50,7 +50,7 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
     volumes:
-      - ${KAFKA_HOST_PATH:-./data/kafka-data}:/tmp/kraft-combined-logs
+      - ${KAFKA_HOST_PATH:-./sec-edgar/kafka-data}:/tmp/kraft-combined-logs
     ports:
       - "9092:9092"
     healthcheck:
@@ -77,7 +77,7 @@ services:
       KAFKA_ENABLED: "true"
       EDGAR_DOWNLOAD_BASE: /data/edgar
     volumes:
-      - ${EDGAR_HOST_PATH:-./data/edgar}:/data/edgar
+      - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar
     ports:
       - "8080:8080"
     depends_on:
@@ -98,7 +98,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - ${PGVECTOR_HOST_PATH:-./data/pgvector-data}:/var/lib/postgresql/data
+      - ${PGVECTOR_HOST_PATH:-./sec-edgar/pgvector-data}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d edgar"]
       interval: 5s
@@ -127,7 +127,7 @@ services:
       KAFKA_GROUP_ID: edgar-pgvector-etl
       KAFKA_AUTO_OFFSET_RESET: earliest
     volumes:
-      - ${EDGAR_HOST_PATH:-./data/edgar}:/data/edgar:ro
+      - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar:ro
 
   # --- 3. semantic search UI (pgvector + Ollama on host) ---
 

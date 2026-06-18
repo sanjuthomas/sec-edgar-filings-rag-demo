@@ -16,7 +16,7 @@ SEC annual and quarterly reports (10-K, 10-Q) are rich sources of corporate info
 
 All heavy lifting lives in sibling repositories ([sec-edgar-filings](https://github.com/sanjuthomas/sec-edgar-filings), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui)). **This repository is the glue** — one `docker compose up` to run the full stack with Docker and Ollama installed locally.
 
-Persistent data (filings, MongoDB, Kafka, pgvector) is stored in **host directories you choose** (defaults to `./data/` under this repo). The LLM runs on the host via Ollama, not in a container.
+Persistent data (filings, MongoDB, Kafka, pgvector) is stored in **host directories you choose** (defaults to `./sec-edgar/` under this repo). The LLM runs on the host via Ollama, not in a container.
 
 ## What it does
 
@@ -75,7 +75,7 @@ cp .env.example .env
 # Edit .env — set SEC_USER_AGENT and optionally override data directory paths
 
 # Create default data directories (skip if you changed paths in .env — mkdir those instead)
-mkdir -p data/edgar data/mongo-data data/kafka-data data/pgvector-data
+mkdir -p sec-edgar/filings-data sec-edgar/mongo-data sec-edgar/kafka-data sec-edgar/pgvector-data
 
 docker compose pull
 docker compose up -d
@@ -144,14 +144,14 @@ Startup order is enforced with healthchecks: MongoDB and Kafka become healthy fi
 
 ## Data directories
 
-Host paths are configured with environment variables. Defaults are under `./data/` in this repo.
+Host paths are configured with environment variables. Defaults are under `./sec-edgar/` in this repo.
 
 | Variable | Default | Mounted in container as | Used by |
 |----------|---------|-------------------------|---------|
-| `EDGAR_HOST_PATH` | `./data/edgar` | `/data/edgar` | Filing `.htm` files (read-write for downloader, read-only for ETL) |
-| `MONGO_HOST_PATH` | `./data/mongo-data` | `/data/db` | MongoDB data |
-| `KAFKA_HOST_PATH` | `./data/kafka-data` | `/tmp/kraft-combined-logs` | Kafka broker logs |
-| `PGVECTOR_HOST_PATH` | `./data/pgvector-data` | `/var/lib/postgresql/data` | PostgreSQL / pgvector data |
+| `EDGAR_HOST_PATH` | `./sec-edgar/filings-data` | `/data/edgar` | Filing `.htm` files (read-write for downloader, read-only for ETL) |
+| `MONGO_HOST_PATH` | `./sec-edgar/mongo-data` | `/data/db` | MongoDB data |
+| `KAFKA_HOST_PATH` | `./sec-edgar/kafka-data` | `/tmp/kraft-combined-logs` | Kafka broker logs |
+| `PGVECTOR_HOST_PATH` | `./sec-edgar/pgvector-data` | `/var/lib/postgresql/data` | PostgreSQL / pgvector data |
 
 Filing metadata in MongoDB stores `local_path` values under `/data/edgar/...` (the in-container mount). Both the downloader and ETL use that same container path, so your host path can be anywhere.
 
@@ -165,10 +165,10 @@ Copy `.env.example` to `.env` and edit as needed:
 SEC_USER_AGENT=Your Name your.email@example.com
 
 # Optional — override defaults
-EDGAR_HOST_PATH=./data/edgar
-MONGO_HOST_PATH=./data/mongo-data
-KAFKA_HOST_PATH=./data/kafka-data
-PGVECTOR_HOST_PATH=./data/pgvector-data
+EDGAR_HOST_PATH=./sec-edgar/filings-data
+MONGO_HOST_PATH=./sec-edgar/mongo-data
+KAFKA_HOST_PATH=./sec-edgar/kafka-data
+PGVECTOR_HOST_PATH=./sec-edgar/pgvector-data
 ```
 
 The SEC requires a descriptive `User-Agent` on every programmatic request. A placeholder is used if unset, which may lead to throttling.
