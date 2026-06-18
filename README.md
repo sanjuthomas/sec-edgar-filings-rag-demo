@@ -22,9 +22,9 @@ Persistent data (filings, MongoDB, Kafka, pgvector) is stored in **host director
 
 | Step | Component | Role |
 |------|-----------|------|
-| 1 | [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) | Downloads filings from SEC EDGAR, stores metadata in MongoDB, writes `.htm` files to disk, publishes Kafka events; **Admin** and **Browse** web UIs on port **18080** |
-| 2 | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | Consumes the `filings` Kafka topic, reads filing content from disk, generates embeddings, loads pgvector |
-| 3 | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | Semantic search + RAG answers over pgvector, using Ollama on your Mac for generation |
+| 1 | [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) | Crawler **Admin** + **Browse** UIs and REST API on **18080**; downloads filings, stores metadata in MongoDB, writes `.htm` files to disk, publishes Kafka events |
+| 2 | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | Consumes the `filings` Kafka topic, reads filing content from disk, generates embeddings, loads pgvector; **Search UI** on port **18000** (chunk retrieval, no LLM) |
+| 3 | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | RAG search + cited answers over pgvector, using Ollama on your Mac for generation (**18095**) |
 | 4 | [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | Optional browser UI to inspect Kafka messages (debug) |
 
 ## Architecture
@@ -40,8 +40,8 @@ flowchart LR
     Mongo --> ETL
     Disk --> ETL
     ETL --> PG[("pgvector")]
-
-    PG --> UI["semantic-search-ui"]
+    PG --> SearchUI["pgvector search UI"]
+    PG --> UI["RAG search UI"]
     Ollama["Ollama on host"] --> UI
 
     Kafka -.->|debug profile| KWC["kafka-web-clients"]
@@ -49,9 +49,10 @@ flowchart LR
 
 **Data flow**
 
-1. Downloader registers a filing in MongoDB and publishes a `filing.downloaded` event to Kafka.
+1. **Crawler Admin** starts a download job; each new filing is registered in MongoDB, written to disk, and published to Kafka.
 2. ETL consumer reads the event, looks up metadata in MongoDB, reads the `.htm` file from the shared EDGAR mount, chunks and embeds text, upserts into pgvector.
-3. Search UI embeds your question (ONNX, same model as ingest), retrieves nearest chunks from pgvector, and asks Ollama to synthesize a cited answer.
+3. **pgvector Search UI** (`18000`) embeds your question and returns the top matching chunks (verify filing/chunk counts and test retrieval).
+4. **RAG Search UI** (`18095`) embeds your question, retrieves chunks from pgvector, and asks Ollama to synthesize a cited answer.
 
 ## Prerequisites
 
@@ -101,30 +102,86 @@ curl http://localhost:18080/health
 
 | UI | URL | Purpose |
 |----|-----|---------|
-| **Filings Admin** | http://localhost:18080/ | Start download jobs (single ticker, S&P 500 batch, full reload), view job progress and universe coverage |
-| **Filings Browse** | http://localhost:18080/browse | Read-only lookup — filing metadata in MongoDB and files on disk for a ticker |
+| **Crawler Admin** | http://localhost:18080/ | Start and monitor SEC filing download jobs |
+| **Crawler Browse** | http://localhost:18080/browse | Inspect downloaded metadata and on-disk files by ticker |
+| **pgvector Search** | http://localhost:18000 | Semantic search over embedded chunks; filing/chunk stats; top-K passages (no LLM) |
 | **RAG Search** | http://localhost:18095 | Semantic search and cited answers over embedded filings (requires Ollama on host) |
 | **Kafka debug** | http://localhost:18081 | Inspect `filings` topic messages (`debug` profile only) |
 
-API docs for the filings app: http://localhost:18080/docs
+See [Crawler UI](#crawler-ui) below for Admin and Browse details.
+
+API docs (OpenAPI): http://localhost:18080/docs
+
+pgvector search API: http://localhost:18000/api/search?q=...&top_k=10
+
+## Crawler UI
+
+The [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) image includes a FastAPI app with two browser pages on port **18080**. Together they are the control plane for ingesting filings into the demo pipeline — nothing is downloaded until you start a job from **Admin**.
+
+Nav links in the header switch between **Browse** and **Admin**.
+
+### Admin — http://localhost:18080/
+
+Use this page to **start download jobs** and watch progress. Each newly registered filing is written to MongoDB, saved under your configured `EDGAR_HOST_PATH`, and published to the Kafka `filings` topic for the pgvector ETL.
+
+| Action | What it does |
+|--------|----------------|
+| **Download one ticker** | Fetch recent filings (10-K, 10-Q, 8-K) for a single symbol |
+| **Batch download** | Walk the active S&P 500 universe sequentially |
+| **Full reload** | Clear `filing_metadata`, reset per-ticker download state, and re-download the full universe (existing on-disk files are reused) |
+| **Universe coverage** | Table of per-ticker download status from MongoDB |
+
+The **Job progress** panel polls live while a job runs (status badge, current ticker, counts). Runtime settings (Kafka, paths, rate limits) are shown in the header via `/api/config`.
+
+### Browse — http://localhost:18080/browse
+
+Use this page for **read-only inspection** after downloads. Enter a ticker (e.g. `GS`) or open a direct link such as http://localhost:18080/browse?ticker=GS.
+
+| Panel | What it shows |
+|-------|----------------|
+| **MongoDB** | All `filing_metadata` rows for the ticker — form, filing date, accession number, download time, local path, SEC document URL |
+| **Filesystem** | Files under `{EDGAR_HOST_PATH}/{TICKER}/` — accession directory, filename, size, modified time |
+
+Browse always returns empty tables when no data exists (no error). It does not call SEC EDGAR; it only reads what Admin jobs have already stored.
+
+### Crawler REST API (port 18080)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Liveness check |
+| `GET` | `/api/filings/{ticker}` | Filing metadata for one ticker (`404` if none) |
+| `GET` | `/api/browse/{ticker}` | Combined MongoDB metadata + on-disk file listing |
+| `GET` | `/api/stats` | Stored filing count and Kafka status |
+| `GET` | `/api/jobs/current` | Active download job, if any |
+| `POST` | `/api/jobs/download/ticker` | Start single-ticker download |
+| `POST` | `/api/jobs/download/batch` | Start S&P 500 batch download |
+| `POST` | `/api/jobs/download/full-reload` | Clear metadata and re-download all |
+| `GET` | `/api/universe/sp500/status` | S&P 500 coverage summary |
+
+```bash
+curl http://localhost:18080/health
+curl http://localhost:18080/api/filings/GS
+curl http://localhost:18080/api/browse/GS
+```
 
 ## End-to-end demo
 
-The stack starts infrastructure and services, but **does not download filings automatically**. Use the **Filings Admin** UI or CLI jobs to populate data.
+The stack starts infrastructure and services, but **does not download filings automatically**. Open the **Crawler Admin** UI to start jobs (or use the CLI below).
 
 ### Option A — browser (recommended)
 
-1. Open **http://localhost:18080/** (Admin)
-2. Run **Batch download** (or download a single ticker) to fetch S&P 500 filings
-3. Watch job progress on the same page
-4. Open **http://localhost:18080/browse** and enter a ticker (e.g. `GS`) to inspect stored metadata and files
+1. Open **http://localhost:18080/** (**Crawler Admin**)
+2. Run **Batch download** (or **Download one ticker**) to fetch filings from SEC EDGAR
+3. Watch **Job progress** on the same page
+4. Open **http://localhost:18080/browse** (**Crawler Browse**) and enter a ticker (e.g. `GS`) to verify MongoDB metadata and on-disk files
 5. Watch ETL ingest events:
 
 ```bash
 docker compose logs -f sec-edgar-filings-to-pgvector
 ```
 
-6. Open **http://localhost:18095** and ask a question once chunks are loaded
+6. Open **http://localhost:18000** (pgvector Search) to confirm filing/chunk counts and try semantic search
+7. Open **http://localhost:18095** (RAG Search) for a full cited answer (requires Ollama)
 
 ### Option B — CLI
 
@@ -158,17 +215,18 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 |-----------------|-------|-----------|-------|
 | `init-dirs` | `alpine:3.21` | — | Creates host data directories on first start |
 | `init-db` | `pgvector/pgvector:pg17` | — | Creates pgvector tables on first start (`sql/001_init.sql`) |
-| `sec-edgar-filings-crawler` | `sanjuthomas/sec-edgar-filings-crawler:latest` | **18080** | Filings Admin UI, Browse UI, REST API |
+| `sec-edgar-filings-crawler` | `sanjuthomas/sec-edgar-filings-crawler:latest` | **18080** | Crawler Admin UI, Browse UI, REST API |
 | `mongo` | `mongo:7` | **10017** | Filing metadata |
 | `kafka` | `apache/kafka:3.9.0` | **10092** | `filings` topic |
 | `pgvector` | `pgvector/pgvector:pg17` | **10432** | DB `edgar`, user `postgres` |
 | `sec-edgar-filings-to-pgvector` | `sanjuthomas/sec-edgar-filings-to-pgvector:latest` | — | Kafka consumer / ETL |
-| `sec-edgar-filings-semantic-search-ui` | `sanjuthomas/sec-edgar-filings-semantic-search-ui:latest` | **18095** | RAG search UI |
+| `sec-edgar-filings-to-pgvector-search` | `sanjuthomas/sec-edgar-filings-to-pgvector:latest` | **18000** | pgvector semantic search UI + JSON API (`edgar-etl serve`) |
+| `sec-edgar-filings-semantic-search-ui` | `sanjuthomas/sec-edgar-filings-semantic-search-ui:latest` | **18095** | RAG search UI (Ollama answers) |
 | `kafka-web-clients` | `sanjuthomas/kafka-web-clients:latest` | **18081** | Debug only (`debug` profile) |
 
 Containers talk to each other on the default internal ports (for example `mongo:27017`, `kafka:9092`). Host ports above are only for access from your machine.
 
-Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB/Kafka/pgvector become healthy, `init-db` applies the pgvector schema, then the filings app, ETL consumer, and RAG UI start.
+Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB/Kafka/pgvector become healthy, `init-db` applies the pgvector schema, then the filings crawler, ETL consumer, pgvector search UI, and RAG UI start.
 
 Host paths are configured with environment variables. Defaults are under `./sec-edgar/` in this repo.
 
@@ -251,9 +309,10 @@ curl http://localhost:18080/api/browse/GS
 
 | Symptom | Check |
 |---------|-------|
-| Downloader can't write filings | Does `EDGAR_HOST_PATH` exist? Is the path shared with Docker (File sharing on macOS)? |
+| Downloader can't write filings | Set `SEC_USER_AGENT` in `.env`; check `EDGAR_HOST_PATH` exists and is shared with Docker |
+| Browse shows empty tables | Run a download job from **Crawler Admin** first; confirm ticker symbol (e.g. `GS`) |
 | ETL skips filings | File exists at `local_path` from MongoDB under `/data/edgar` inside containers? |
-| UI returns no results | ETL logs show chunks loaded? `docker compose logs sec-edgar-filings-to-pgvector` |
+| UI returns no results | Chunks loaded? Check http://localhost:18000/api/stats and `docker compose logs sec-edgar-filings-to-pgvector` |
 | UI errors on answer generation | Ollama running? `curl http://localhost:11434/api/tags` |
 | Kafka debug can't connect | From debug container use `kafka:9092`; from host use `localhost:10092` |
 

@@ -16,7 +16,7 @@
 #   docker compose --profile debug up -d
 #
 # Host ports (all > 10000): mongo 10017, kafka 10092, pgvector 10432,
-#   filings API 18080, search UI 18095, kafka debug 18081
+#   filings crawler 18080, pgvector search UI 18000, RAG UI 18095, kafka debug 18081
 
 services:
   init-dirs:
@@ -200,6 +200,22 @@ services:
       KAFKA_AUTO_OFFSET_RESET: earliest
     volumes:
       - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar:ro
+
+  sec-edgar-filings-to-pgvector-search:
+    image: sanjuthomas/sec-edgar-filings-to-pgvector:latest
+    restart: unless-stopped
+    depends_on:
+      init-db:
+        condition: service_completed_successfully
+      pgvector:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@pgvector:5432/edgar
+      EMBEDDING_MODEL: BAAI/bge-small-en-v1.5
+      LOG_LEVEL: INFO
+    ports:
+      - "18000:8000"
+    command: ["edgar-etl", "serve", "--host", "0.0.0.0", "--port", "8000"]
 
   # --- 3. semantic search UI (pgvector + Ollama on host) ---
 
