@@ -1,8 +1,22 @@
 # SEC EDGAR Filings RAG Demo
 
-Docker Compose orchestration for an end-to-end pipeline: download SEC EDGAR filings, embed them into pgvector, and search them with a local RAG UI backed by Ollama.
+> **Ask natural-language questions over real SEC filings** — downloaded from EDGAR, embedded into pgvector, and answered with citations via a local Ollama LLM.
 
-This repo contains **no application source code** — only Compose wiring that pulls published images from Docker Hub and connects them on a shared network.
+Docker Compose orchestration for an end-to-end retrieval-augmented generation (RAG) pipeline. Four published images are wired together: a filings downloader, a Kafka-driven ETL consumer, a semantic search web UI, and an optional Kafka debug tool.
+
+This repo contains **no application source code** — only Compose wiring, environment templates, and documentation.
+
+## About this project
+
+SEC annual and quarterly reports (10-K, 10-Q) are rich sources of corporate information, but they are long, repetitive, and hard to search with keywords alone. This demo shows a practical pipeline for:
+
+1. **Ingesting** recent S&P 500 filings from the SEC EDGAR API into local storage
+2. **Indexing** filing text as vector embeddings in PostgreSQL with pgvector
+3. **Querying** with semantic search and generating grounded answers that cite the source passages
+
+All heavy lifting lives in sibling repositories ([sec-edgar-filings](https://github.com/sanjuthomas/sec-edgar-filings), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui)). **This repository is the glue** — one `docker compose up` to run the full stack on a Mac with a Transcend external drive and Ollama installed locally.
+
+Persistent data (filings, MongoDB, Kafka, pgvector) is stored on `/Volumes/Transcend`. The LLM runs on the host via Ollama, not in a container.
 
 ## What it does
 
@@ -17,20 +31,20 @@ This repo contains **no application source code** — only Compose wiring that p
 
 ```mermaid
 flowchart LR
-    SEC[SEC EDGAR] --> API[sec-edgar-filings]
-    API --> Mongo[(MongoDB)]
-    API --> Kafka[[Kafka: filings]]
-    API --> Disk[/Volumes/Transcend/edgar]
+    SEC["SEC EDGAR"] --> API["sec-edgar-filings"]
+    API --> Mongo[("MongoDB")]
+    API --> Kafka[["filings topic"]]
+    API --> Disk["EDGAR files on disk"]
 
-    Kafka --> ETL[sec-edgar-filings-to-pgvector]
+    Kafka --> ETL["sec-edgar-filings-to-pgvector"]
     Mongo --> ETL
     Disk --> ETL
-    ETL --> PG[(pgvector)]
+    ETL --> PG[("pgvector")]
 
-    PG --> UI[semantic-search-ui]
-    Ollama[Ollama on host] --> UI
+    PG --> UI["semantic-search-ui"]
+    Ollama["Ollama on host"] --> UI
 
-    Kafka -.->|debug profile| KWC[kafka-web-clients]
+    Kafka -.->|debug profile| KWC["kafka-web-clients"]
 ```
 
 **Data flow**
@@ -63,7 +77,7 @@ mkdir -p /Volumes/Transcend/edgar \
 ## Quick start
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/sanjuthomas/sec-edgar-filings-rag-demo.git
 cd sec-edgar-filings-rag-demo
 
 cp .env.example .env
