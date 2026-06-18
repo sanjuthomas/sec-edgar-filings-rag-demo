@@ -74,12 +74,11 @@ cd sec-edgar-filings-rag-demo
 cp .env.example .env
 # Edit .env — set SEC_USER_AGENT and optionally override data directory paths
 
-# Create default data directories (skip if you changed paths in .env — mkdir those instead)
-mkdir -p sec-edgar/filings-data sec-edgar/mongo-data sec-edgar/kafka-data sec-edgar/pgvector-data
-
 docker compose pull
 docker compose up -d
 ```
+
+Data directories are created automatically on first start (via the `init-dirs` service).
 
 Or pass paths inline without editing `.env`:
 
@@ -132,6 +131,7 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 
 | Compose service | Image | Host port | Notes |
 |-----------------|-------|-----------|-------|
+| `init-dirs` | `alpine:3.21` | — | Creates host data directories on first start |
 | `sec-edgar-filings` | `sanjuthomas/sec-edgar-filings:latest` | **8080** | EDGAR downloader API |
 | `mongo` | `mongo:7` | **27017** | Filing metadata |
 | `kafka` | `apache/kafka:3.9.0` | **9092** | `filings` topic |
@@ -140,7 +140,7 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 | `sec-edgar-filings-semantic-search-ui` | `sanjuthomas/sec-edgar-filings-semantic-search-ui:latest` | **8095** | RAG search UI |
 | `kafka-web-clients` | `sanjuthomas/kafka-web-clients:latest` | **8081** | Debug only (`debug` profile) |
 
-Startup order is enforced with healthchecks: MongoDB and Kafka become healthy first, then the downloader API; pgvector must be healthy before the ETL consumer and UI start.
+Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB and Kafka become healthy, then the downloader API; pgvector must be healthy before the ETL consumer and UI start.
 
 ## Data directories
 
@@ -155,7 +155,7 @@ Host paths are configured with environment variables. Defaults are under `./sec-
 
 Filing metadata in MongoDB stores `local_path` values under `/data/edgar/...` (the in-container mount). Both the downloader and ETL use that same container path, so your host path can be anywhere.
 
-Set paths in `.env` or export them before `docker compose up`. Relative paths are resolved from the directory containing `docker-compose.yml`.
+Set paths in `.env` or export them before `docker compose up`. Relative paths are resolved from the directory containing `docker-compose.yml`. Directories are created automatically when the stack starts — no manual `mkdir` required.
 
 ## Configuration
 

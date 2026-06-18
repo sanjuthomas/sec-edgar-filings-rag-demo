@@ -16,11 +16,25 @@
 #   docker compose --profile debug up -d
 
 services:
+  init-dirs:
+    image: alpine:3.21
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /edgar /mongo /kafka /pgvector"]
+    volumes:
+      - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/edgar
+      - ${MONGO_HOST_PATH:-./sec-edgar/mongo-data}:/mongo
+      - ${KAFKA_HOST_PATH:-./sec-edgar/kafka-data}:/kafka
+      - ${PGVECTOR_HOST_PATH:-./sec-edgar/pgvector-data}:/pgvector
+
   # --- 1. sec-edgar-filings (producer: MongoDB + Kafka + downloader API) ---
 
   mongo:
     image: mongo:7
     restart: unless-stopped
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
     ports:
       - "27017:27017"
     volumes:
@@ -35,6 +49,9 @@ services:
   kafka:
     image: apache/kafka:3.9.0
     restart: unless-stopped
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -91,6 +108,9 @@ services:
   pgvector:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
+    depends_on:
+      init-dirs:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
