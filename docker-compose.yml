@@ -296,7 +296,7 @@ services:
       - "18002:8000"
     command: ["edgar-etl", "serve", "--host", "0.0.0.0", "--port", "8000"]
 
-  # --- 4. semantic search UI (pgvector + Ollama on host) ---
+  # --- 4. semantic search UI (pgvector or Qdrant + Ollama on host) ---
 
   sec-edgar-filings-semantic-search-ui:
     image: sanjuthomas/sec-edgar-filings-semantic-search-ui:latest
@@ -308,12 +308,19 @@ services:
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres
       SPRING_AI_OLLAMA_BASE_URL: http://host.docker.internal:11434
+      APP_VECTORSTORES_DEFAULT_VECTOR_STORE: pgvector
+      APP_VECTORSTORES_QDRANT_URL: http://qdrant:6333
+      APP_VECTORSTORES_QDRANT_COLLECTION: filing_chunks
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       init-db:
         condition: service_completed_successfully
+      init-qdrant:
+        condition: service_completed_successfully
       pgvector:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
 
   # --- 5. Kafka debug UI (optional) ---

@@ -4,7 +4,7 @@
 
 Docker Compose orchestration for an end-to-end retrieval-augmented generation (RAG) pipeline. Five published images are wired together: a filings downloader, Kafka-driven ETL consumers for pgvector and Qdrant, semantic search web UIs, and an optional Kafka debug tool.
 
-This repo contains **no application source code** — only Compose wiring, environment templates, and documentation.
+This repo contains **no application source code** — only Compose wiring, environment templates, and documentation. Licensed under the [MIT License](LICENSE).
 
 ## About this project
 
@@ -25,7 +25,7 @@ Persistent data (filings, MongoDB, Kafka, pgvector, Qdrant) is stored in **host 
 | 1 | [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) | Crawler **Admin** + **Browse** UIs and REST API on **18080**; downloads filings, stores metadata in MongoDB, writes `.htm` files to disk, publishes Kafka events |
 | 2 | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | Consumes the `filings` Kafka topic, reads filing content from disk, generates embeddings, loads pgvector; **Search UI** on port **18000** (chunk retrieval, no LLM) |
 | 2b | [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant) | Same Kafka pipeline into Qdrant; **Search UI** on **18002**, **Qdrant dashboard** on **16333** (chunk retrieval, no LLM) |
-| 3 | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | RAG search + cited answers over pgvector, using Ollama on your Mac for generation (**18095**) |
+| 3 | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | RAG search + cited answers over **pgvector** or **Qdrant** (selectable in UI), using Ollama on your Mac for generation (**18095**) |
 | 4 | [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | Optional browser UI to inspect Kafka messages (debug) |
 
 ## Architecture
@@ -57,7 +57,7 @@ flowchart LR
 1. **Crawler Admin** starts a download job; each new filing is registered in MongoDB, written to disk, and published to Kafka.
 2. ETL consumers read the event, read the `.htm` file from the shared EDGAR mount, chunk and embed text, and upsert into pgvector and/or Qdrant (both run in parallel).
 3. **pgvector Search UI** (`18000`) or **Qdrant Search UI** (`18002`) embeds your question and returns the top matching chunks (verify filing/chunk counts and test retrieval).
-4. **RAG Search UI** (`18095`) embeds your question, retrieves chunks from pgvector, and asks Ollama to synthesize a cited answer.
+4. **RAG Search UI** (`18095`) embeds your question, retrieves chunks from the selected vector store (pgvector or Qdrant), and asks Ollama to synthesize a cited answer.
 
 ## Prerequisites
 
@@ -113,7 +113,7 @@ curl http://localhost:18080/health
 | **pgvector Search** | http://localhost:18000 | Semantic search over embedded chunks in pgvector; filing/chunk stats; top-K passages (no LLM) |
 | **Qdrant Search** | http://localhost:18002 | Semantic search over embedded chunks in Qdrant; filing/chunk stats; top-K passages (no LLM) |
 | **Qdrant dashboard** | http://localhost:16333/dashboard | Inspect `filing_chunks` collection, points, and indexes |
-| **RAG Search** | http://localhost:18095 | Semantic search and cited answers over embedded filings (requires Ollama on host) |
+| **RAG Search** | http://localhost:18095 | Semantic search and cited answers; choose **pgvector** or **Qdrant** in the UI (requires Ollama on host) |
 | **Kafka debug** | http://localhost:18081 | Inspect `filings` topic messages (`debug` profile only) |
 
 See [Crawler UI](#crawler-ui) below for Admin and Browse details.
@@ -236,7 +236,7 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 | `sec-edgar-filings-to-pgvector-search` | `sanjuthomas/sec-edgar-filings-to-pgvector:latest` | **18000** | pgvector semantic search UI + JSON API (`edgar-etl serve`) |
 | `sec-edgar-filings-to-qdrant` | `sanjuthomas/sec-edgar-filings-to-qdrant:latest` | — | Kafka consumer / ETL → Qdrant |
 | `sec-edgar-filings-to-qdrant-search` | `sanjuthomas/sec-edgar-filings-to-qdrant:latest` | **18002** | Qdrant semantic search UI + JSON API (`edgar-etl serve`) |
-| `sec-edgar-filings-semantic-search-ui` | `sanjuthomas/sec-edgar-filings-semantic-search-ui:latest` | **18095** | RAG search UI (Ollama answers) |
+| `sec-edgar-filings-semantic-search-ui` | `sanjuthomas/sec-edgar-filings-semantic-search-ui:latest` | **18095** | RAG search UI (pgvector or Qdrant + Ollama answers) |
 | `kafka-web-clients` | `sanjuthomas/kafka-web-clients:latest` | **18081** | Debug only (`debug` profile) |
 
 Containers talk to each other on the default internal ports (for example `mongo:27017`, `kafka:9092`). Host ports above are only for access from your machine.
@@ -275,6 +275,8 @@ QDRANT_HOST_PATH=./sec-edgar/qdrant-data
 The SEC requires a descriptive `User-Agent` on every programmatic request. A placeholder is used if unset, which may lead to throttling.
 
 Ollama is **not** started by this compose file. The RAG UI reaches it at `http://host.docker.internal:11434` (your local Ollama install).
+
+The RAG UI connects to **pgvector** via `SPRING_DATASOURCE_URL` and to **Qdrant** via `APP_VECTORSTORES_QDRANT_URL` (`http://qdrant:6333` on the Compose network). Use the **Vector store** dropdown at http://localhost:18095 to switch between them. Host port **16333** is only for the Qdrant dashboard from your machine — containers use `qdrant:6333`.
 
 ## Kafka debug UI
 
@@ -346,4 +348,6 @@ curl http://localhost:18080/api/browse/GS
 
 ## License
 
-See individual component repositories for license terms.
+This repository (Compose wiring, environment templates, SQL init script, and documentation) is licensed under the [MIT License](LICENSE).
+
+The published Docker images and sibling application repositories listed above are separate projects and may use different license terms. See each component repository for details.
