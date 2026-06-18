@@ -128,10 +128,60 @@ services:
       timeout: 5s
       retries: 5
 
+  init-kafka:
+    image: apache/kafka:3.9.0
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint:
+      [
+        "/opt/kafka/bin/kafka-topics.sh",
+        "--bootstrap-server",
+        "kafka:9092",
+        "--create",
+        "--if-not-exists",
+        "--topic",
+        "filings",
+        "--partitions",
+        "1",
+        "--replication-factor",
+        "1",
+      ]
+
+  init-db:
+    image: pgvector/pgvector:pg17
+    restart: "no"
+    depends_on:
+      pgvector:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: postgres
+    volumes:
+      - ./sql/001_init.sql:/init.sql:ro
+    entrypoint:
+      [
+        "psql",
+        "-h",
+        "pgvector",
+        "-U",
+        "postgres",
+        "-d",
+        "edgar",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-f",
+        "/init.sql",
+      ]
+
   sec-edgar-filings-to-pgvector:
     image: sanjuthomas/sec-edgar-filings-to-pgvector:latest
     restart: unless-stopped
     depends_on:
+      init-db:
+        condition: service_completed_successfully
+      init-kafka:
+        condition: service_completed_successfully
       mongo:
         condition: service_healthy
       kafka:
@@ -141,7 +191,6 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@pgvector:5432/edgar
       EDGAR_DATA_DIR: /data/edgar
-      ALLOWED_FORMS: 10-K,10-Q,10-K/A,10-Q/A
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: sec_edgar_filings
       MONGO_FILING_METADATA_COLLECTION: filing_metadata
@@ -167,6 +216,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      init-db:
+        condition: service_completed_successfully
       pgvector:
         condition: service_healthy
 

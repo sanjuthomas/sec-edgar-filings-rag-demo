@@ -132,6 +132,7 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 | Compose service | Image | Host port | Notes |
 |-----------------|-------|-----------|-------|
 | `init-dirs` | `alpine:3.21` | — | Creates host data directories on first start |
+| `init-db` | `pgvector/pgvector:pg17` | — | Creates pgvector tables on first start (`sql/001_init.sql`) |
 | `sec-edgar-filings` | `sanjuthomas/sec-edgar-filings:latest` | **18080** | EDGAR downloader API |
 | `mongo` | `mongo:7` | **10017** | Filing metadata |
 | `kafka` | `apache/kafka:3.9.0` | **10092** | `filings` topic |
@@ -177,12 +178,20 @@ The SEC requires a descriptive `User-Agent` on every programmatic request. A pla
 
 Ollama is **not** started by this compose file. The UI reaches it at `http://host.docker.internal:11434` (your local Ollama install).
 
+Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB/Kafka/pgvector become healthy, `init-db` applies the pgvector schema, then the downloader API and ETL consumer start.
+
 ## Kafka debug UI
 
-Start the optional debug profile to watch messages on the `filings` topic:
+The Kafka debug tool is **not** started by default. Use the `debug` profile:
 
 ```bash
 docker compose --profile debug up -d
+```
+
+Or add it to an already-running stack:
+
+```bash
+docker compose --profile debug up -d kafka-web-clients
 ```
 
 Open **http://localhost:18081** and configure:
