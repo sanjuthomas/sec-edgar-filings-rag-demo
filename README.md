@@ -22,7 +22,7 @@ Persistent data (filings, MongoDB, Kafka, pgvector) is stored in **host director
 
 | Step | Component | Role |
 |------|-----------|------|
-| 1 | [sec-edgar-filings](https://github.com/sanjuthomas/sec-edgar-filings) | Downloads filings from SEC EDGAR, stores metadata in MongoDB, writes `.htm` files to disk, publishes Kafka events |
+| 1 | [sec-edgar-filings](https://github.com/sanjuthomas/sec-edgar-filings) | Downloads filings from SEC EDGAR, stores metadata in MongoDB, writes `.htm` files to disk, publishes Kafka events; **Admin** and **Browse** web UIs on port **18080** |
 | 2 | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | Consumes the `filings` Kafka topic, reads filing content from disk, generates embeddings, loads pgvector |
 | 3 | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | Semantic search + RAG answers over pgvector, using Ollama on your Mac for generation |
 | 4 | [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | Optional browser UI to inspect Kafka messages (debug) |
@@ -97,11 +97,36 @@ docker compose ps
 curl http://localhost:18080/health
 ```
 
-Open the RAG UI: **http://localhost:18095**
+### Web UIs
+
+| UI | URL | Purpose |
+|----|-----|---------|
+| **Filings Admin** | http://localhost:18080/ | Start download jobs (single ticker, S&P 500 batch, full reload), view job progress and universe coverage |
+| **Filings Browse** | http://localhost:18080/browse | Read-only lookup — filing metadata in MongoDB and files on disk for a ticker |
+| **RAG Search** | http://localhost:18095 | Semantic search and cited answers over embedded filings (requires Ollama on host) |
+| **Kafka debug** | http://localhost:18081 | Inspect `filings` topic messages (`debug` profile only) |
+
+API docs for the filings app: http://localhost:18080/docs
 
 ## End-to-end demo
 
-The stack starts infrastructure and the filings API, but **does not download filings automatically**. Run the S&P 500 batch jobs to populate data:
+The stack starts infrastructure and services, but **does not download filings automatically**. Use the **Filings Admin** UI or CLI jobs to populate data.
+
+### Option A — browser (recommended)
+
+1. Open **http://localhost:18080/** (Admin)
+2. Run **Batch download** (or download a single ticker) to fetch S&P 500 filings
+3. Watch job progress on the same page
+4. Open **http://localhost:18080/browse** and enter a ticker (e.g. `GS`) to inspect stored metadata and files
+5. Watch ETL ingest events:
+
+```bash
+docker compose logs -f sec-edgar-filings-to-pgvector
+```
+
+6. Open **http://localhost:18095** and ask a question once chunks are loaded
+
+### Option B — CLI
 
 ```bash
 # Refresh S&P 500 ticker universe in MongoDB
@@ -133,7 +158,7 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 |-----------------|-------|-----------|-------|
 | `init-dirs` | `alpine:3.21` | — | Creates host data directories on first start |
 | `init-db` | `pgvector/pgvector:pg17` | — | Creates pgvector tables on first start (`sql/001_init.sql`) |
-| `sec-edgar-filings` | `sanjuthomas/sec-edgar-filings:latest` | **18080** | EDGAR downloader API |
+| `sec-edgar-filings` | `sanjuthomas/sec-edgar-filings:latest` | **18080** | Filings Admin UI, Browse UI, REST API |
 | `mongo` | `mongo:7` | **10017** | Filing metadata |
 | `kafka` | `apache/kafka:3.9.0` | **10092** | `filings` topic |
 | `pgvector` | `pgvector/pgvector:pg17` | **10432** | DB `edgar`, user `postgres` |
@@ -143,9 +168,7 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 
 Containers talk to each other on the default internal ports (for example `mongo:27017`, `kafka:9092`). Host ports above are only for access from your machine.
 
-Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB and Kafka become healthy, then the downloader API; pgvector must be healthy before the ETL consumer and UI start.
-
-## Data directories
+Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB/Kafka/pgvector become healthy, `init-db` applies the pgvector schema, then the filings app, ETL consumer, and RAG UI start.
 
 Host paths are configured with environment variables. Defaults are under `./sec-edgar/` in this repo.
 
@@ -176,9 +199,7 @@ PGVECTOR_HOST_PATH=./sec-edgar/pgvector-data
 
 The SEC requires a descriptive `User-Agent` on every programmatic request. A placeholder is used if unset, which may lead to throttling.
 
-Ollama is **not** started by this compose file. The UI reaches it at `http://host.docker.internal:11434` (your local Ollama install).
-
-Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB/Kafka/pgvector become healthy, `init-db` applies the pgvector schema, then the downloader API and ETL consumer start.
+Ollama is **not** started by this compose file. The RAG UI reaches it at `http://host.docker.internal:11434` (your local Ollama install).
 
 ## Kafka debug UI
 
@@ -223,6 +244,7 @@ docker compose pull && docker compose up -d
 
 # Query stored filings via API
 curl http://localhost:18080/api/filings/GS
+curl http://localhost:18080/api/browse/GS
 ```
 
 ## Troubleshooting
