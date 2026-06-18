@@ -94,10 +94,10 @@ Verify services:
 
 ```bash
 docker compose ps
-curl http://localhost:8080/health
+curl http://localhost:18080/health
 ```
 
-Open the RAG UI: **http://localhost:8095**
+Open the RAG UI: **http://localhost:18095**
 
 ## End-to-end demo
 
@@ -120,7 +120,7 @@ Watch ETL progress:
 docker compose logs -f sec-edgar-filings-to-pgvector
 ```
 
-Once chunks are loaded, try the UI at http://localhost:8095. Example questions:
+Once chunks are loaded, try the UI at http://localhost:18095. Example questions:
 
 - *Do you know if the Adobe board approved a buyback program?*
 - *Who are the elected directors in Goldman Sachs?*
@@ -132,13 +132,15 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 | Compose service | Image | Host port | Notes |
 |-----------------|-------|-----------|-------|
 | `init-dirs` | `alpine:3.21` | — | Creates host data directories on first start |
-| `sec-edgar-filings` | `sanjuthomas/sec-edgar-filings:latest` | **8080** | EDGAR downloader API |
-| `mongo` | `mongo:7` | **27017** | Filing metadata |
-| `kafka` | `apache/kafka:3.9.0` | **9092** | `filings` topic |
-| `pgvector` | `pgvector/pgvector:pg17` | **5433** | DB `edgar`, user `postgres` |
+| `sec-edgar-filings` | `sanjuthomas/sec-edgar-filings:latest` | **18080** | EDGAR downloader API |
+| `mongo` | `mongo:7` | **10017** | Filing metadata |
+| `kafka` | `apache/kafka:3.9.0` | **10092** | `filings` topic |
+| `pgvector` | `pgvector/pgvector:pg17` | **10432** | DB `edgar`, user `postgres` |
 | `sec-edgar-filings-to-pgvector` | `sanjuthomas/sec-edgar-filings-to-pgvector:latest` | — | Kafka consumer / ETL |
-| `sec-edgar-filings-semantic-search-ui` | `sanjuthomas/sec-edgar-filings-semantic-search-ui:latest` | **8095** | RAG search UI |
-| `kafka-web-clients` | `sanjuthomas/kafka-web-clients:latest` | **8081** | Debug only (`debug` profile) |
+| `sec-edgar-filings-semantic-search-ui` | `sanjuthomas/sec-edgar-filings-semantic-search-ui:latest` | **18095** | RAG search UI |
+| `kafka-web-clients` | `sanjuthomas/kafka-web-clients:latest` | **18081** | Debug only (`debug` profile) |
+
+Containers talk to each other on the default internal ports (for example `mongo:27017`, `kafka:9092`). Host ports above are only for access from your machine.
 
 Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB and Kafka become healthy, then the downloader API; pgvector must be healthy before the ETL consumer and UI start.
 
@@ -183,11 +185,11 @@ Start the optional debug profile to watch messages on the `filings` topic:
 docker compose --profile debug up -d
 ```
 
-Open **http://localhost:8081** and configure:
+Open **http://localhost:18081** and configure:
 
 | Field | Value |
 |-------|-------|
-| Bootstrap servers | `kafka:9092` |
+| Bootstrap servers | `kafka:9092` (from debug container) or `localhost:10092` (from host) |
 | Topic | `filings` |
 
 The kafka-web-clients container runs on the same Compose network, so use the service hostname `kafka`, not `localhost`.
@@ -211,7 +213,7 @@ docker compose logs -f sec-edgar-filings sec-edgar-filings-to-pgvector
 docker compose pull && docker compose up -d
 
 # Query stored filings via API
-curl http://localhost:8080/api/filings/GS
+curl http://localhost:18080/api/filings/GS
 ```
 
 ## Troubleshooting
@@ -222,7 +224,7 @@ curl http://localhost:8080/api/filings/GS
 | ETL skips filings | File exists at `local_path` from MongoDB under `/data/edgar` inside containers? |
 | UI returns no results | ETL logs show chunks loaded? `docker compose logs sec-edgar-filings-to-pgvector` |
 | UI errors on answer generation | Ollama running? `curl http://localhost:11434/api/tags` |
-| Kafka debug can't connect | Use `kafka:9092` (not `localhost:9092`) from the debug container |
+| Kafka debug can't connect | From debug container use `kafka:9092`; from host use `localhost:10092` |
 
 ## Related projects
 

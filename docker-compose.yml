@@ -12,8 +12,11 @@
 # Start the full stack:
 #   docker compose up -d
 #
-# Include Kafka debug UI (port 8081):
+# Include Kafka debug UI (host port 18081):
 #   docker compose --profile debug up -d
+#
+# Host ports (all > 10000): mongo 10017, kafka 10092, pgvector 10432,
+#   filings API 18080, search UI 18095, kafka debug 18081
 
 services:
   init-dirs:
@@ -36,7 +39,7 @@ services:
       init-dirs:
         condition: service_completed_successfully
     ports:
-      - "27017:27017"
+      - "10017:27017"
     volumes:
       - ${MONGO_HOST_PATH:-./sec-edgar/mongo-data}:/data/db
     healthcheck:
@@ -69,7 +72,7 @@ services:
     volumes:
       - ${KAFKA_HOST_PATH:-./sec-edgar/kafka-data}:/tmp/kraft-combined-logs
     ports:
-      - "9092:9092"
+      - "10092:9092"
     healthcheck:
       test:
         [
@@ -96,7 +99,7 @@ services:
     volumes:
       - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar
     ports:
-      - "8080:8080"
+      - "18080:8080"
     depends_on:
       mongo:
         condition: service_healthy
@@ -116,7 +119,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: edgar
     ports:
-      - "5433:5432"
+      - "10432:5432"
     volumes:
       - ${PGVECTOR_HOST_PATH:-./sec-edgar/pgvector-data}:/var/lib/postgresql/data
     healthcheck:
@@ -155,7 +158,7 @@ services:
     image: sanjuthomas/sec-edgar-filings-semantic-search-ui:latest
     restart: unless-stopped
     ports:
-      - "8095:8095"
+      - "18095:8095"
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://pgvector:5432/edgar
       SPRING_DATASOURCE_USERNAME: postgres
@@ -174,7 +177,7 @@ services:
     image: sanjuthomas/kafka-web-clients:latest
     restart: unless-stopped
     ports:
-      - "8081:8080"
+      - "18081:8080"
     depends_on:
       kafka:
         condition: service_healthy
