@@ -41,6 +41,7 @@ flowchart TB
     Kafka --> PgETL["sec-edgar-filings-to-pgvector"]
     Kafka --> QdrantETL["sec-edgar-filings-to-qdrant"]
     Mongo --> PgETL
+    Mongo --> QdrantETL
     Disk --> PgETL
     Disk --> QdrantETL
 
