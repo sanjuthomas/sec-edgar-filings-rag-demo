@@ -93,7 +93,8 @@ services:
       - path: .env
         required: false
     environment:
-      SEC_USER_AGENT: "${SEC_USER_AGENT:-sec-edgar-filings-crawler/0.2 (contact: set SEC_USER_AGENT in .env)}"
+      SEC_USER_AGENT: "${SEC_USER_AGENT:-thomas.sanju@gmail.com}"
+      WIKIPEDIA_USER_AGENT: "${WIKIPEDIA_USER_AGENT:-${SEC_USER_AGENT:-thomas.sanju@gmail.com}}"
       MONGO_URI: mongodb://mongo:27017
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ENABLED: "true"
@@ -179,6 +180,9 @@ services:
   sec-edgar-filings-to-pgvector:
     image: sanjuthomas/sec-edgar-filings-to-pgvector:latest
     restart: unless-stopped
+    cpus: 8
+    mem_reservation: 2g
+    mem_limit: 4g
     depends_on:
       init-db:
         condition: service_completed_successfully
@@ -200,6 +204,7 @@ services:
       KAFKA_TOPIC: filings
       KAFKA_GROUP_ID: edgar-pgvector-etl
       KAFKA_AUTO_OFFSET_RESET: earliest
+      KAFKA_SESSION_TIMEOUT_MS: "180000"
       ALLOWED_FORMS: '["10-K","10-Q","10-K/A","10-Q/A","8-K","8-K/A"]'
     volumes:
       - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar:ro
@@ -258,6 +263,9 @@ services:
   sec-edgar-filings-to-qdrant:
     image: sanjuthomas/sec-edgar-filings-to-qdrant:latest
     restart: unless-stopped
+    cpus: 8
+    mem_reservation: 2g
+    mem_limit: 4g
     depends_on:
       init-qdrant:
         condition: service_completed_successfully
@@ -276,6 +284,7 @@ services:
       KAFKA_TOPIC: filings
       KAFKA_GROUP_ID: edgar-qdrant-etl
       KAFKA_AUTO_OFFSET_RESET: earliest
+      KAFKA_SESSION_TIMEOUT_MS: "180000"
     volumes:
       - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar:ro
 
