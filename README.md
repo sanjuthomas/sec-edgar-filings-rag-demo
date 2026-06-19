@@ -47,6 +47,7 @@ flowchart TB
 
     PgETL --> PG[("pgvector")]
     QdrantETL --> Qdrant[("Qdrant")]
+    PG ~~~ Qdrant
 
     PG --> PgSearch["pgvector search UI :18000"]
     PG -->|"user choice"| RAG["RAG Search Interface :18095"]
