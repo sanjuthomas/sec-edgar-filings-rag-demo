@@ -49,13 +49,13 @@ flowchart TB
     QdrantETL --> Qdrant[("Qdrant")]
 
     PG --> PgSearch["pgvector search UI :18000"]
-    Qdrant --> QdrantSearch["Qdrant search UI :18002"]
     PG -->|"user choice"| RAG["RAG Search Interface :18095"]
     Qdrant -->|"user choice"| RAG
+    Qdrant --> QdrantSearch["Qdrant search UI :18002"]
     RAG -->|"chunks + question"| Ollama["Ollama on host"]
     Ollama -->|"cited answer"| RAG
 
-    PgSearch ~~~ RAG ~~~ QdrantSearch
+    PgSearch ~~~ RAG ~~~ Qdrant
 
     Kafka -.->|debug profile| KWC["kafka-web-clients"]
 ```
