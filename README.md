@@ -14,7 +14,7 @@ SEC annual and quarterly reports (10-K, 10-Q) are rich sources of corporate info
 2. **Indexing** filing text as vector embeddings in PostgreSQL with pgvector
 3. **Querying** with semantic search and generating grounded answers that cite the source passages
 
-All heavy lifting lives in sibling repositories ([sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant), [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui)). **This repository is the glue** — one `docker compose up` to run the full stack with Docker and Ollama installed locally.
+All heavy lifting lives in sibling repositories ([sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant), [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui), [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients)). **This repository is the glue** — one `docker compose up` to run the full stack with Docker and Ollama installed locally. See [Application coordinates](#application-coordinates) for repos, images, and URLs.
 
 Persistent data (filings, MongoDB, Kafka, pgvector, Qdrant) is stored in **host directories you choose** (defaults to `./sec-edgar/` under this repo). The LLM runs on the host via Ollama, not in a container.
 
@@ -27,6 +27,45 @@ Persistent data (filings, MongoDB, Kafka, pgvector, Qdrant) is stored in **host 
 | 2b | [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant) | Same Kafka pipeline into Qdrant; **Search UI** on **18002**, **Qdrant dashboard** on **16333** (chunk retrieval, no LLM) |
 | 3 | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | RAG search + cited answers over **pgvector** or **Qdrant** (selectable in UI), using Ollama on your Mac for generation (**18095**) |
 | 4 | [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | Optional browser UI to inspect Kafka messages (debug) |
+
+## Application coordinates
+
+Quick reference for every application in the stack: source repository, published Docker image, and host URL.
+
+### Custom applications
+
+| Service | GitHub | Docker image | Host URL |
+|---------|--------|--------------|----------|
+| **Crawler** (Admin + Browse) | [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) | [`sanjuthomas/sec-edgar-filings-crawler:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-crawler) | http://localhost:18080 |
+| **pgvector ETL** | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | [`sanjuthomas/sec-edgar-filings-to-pgvector:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-to-pgvector) | *(no host port — Kafka consumer)* |
+| **pgvector Search** | same repo | same image (`edgar-etl serve`) | http://localhost:18000 |
+| **Qdrant ETL** | [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant) | [`sanjuthomas/sec-edgar-filings-to-qdrant:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-to-qdrant) | *(no host port — Kafka consumer)* |
+| **Qdrant Search** | same repo | same image (`edgar-etl serve`) | http://localhost:18002 |
+| **RAG UI** | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | [`sanjuthomas/sec-edgar-filings-semantic-search-ui:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-semantic-search-ui) | http://localhost:18095 |
+| **Kafka debug UI** *(optional, `--profile debug`)* | [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | [`sanjuthomas/kafka-web-clients:latest`](https://hub.docker.com/r/sanjuthomas/kafka-web-clients) | http://localhost:18081 |
+
+### Orchestration
+
+| Repo | Role |
+|------|------|
+| [sec-edgar-filings-rag-demo](https://github.com/sanjuthomas/sec-edgar-filings-rag-demo) | Compose wiring only — no application source |
+
+### Infrastructure
+
+| Service | Image | Host access |
+|---------|-------|-------------|
+| MongoDB | `mongo:7` | `localhost:10017` |
+| Kafka | `apache/kafka:3.9.0` | `localhost:10092` |
+| pgvector DB | `pgvector/pgvector:pg17` | `localhost:10432` (database `edgar`, user/password `postgres`) |
+| Qdrant | `qdrant/qdrant:latest` | REST http://localhost:16333, gRPC `16334`, dashboard http://localhost:16333/dashboard |
+
+### External dependency
+
+| Service | URL |
+|---------|-----|
+| **Ollama** (host, for RAG answer generation) | http://localhost:11434 |
+
+Compose service names, init jobs, and volume mounts are listed in [Services and ports](#services-and-ports).
 
 ## Architecture
 
@@ -356,13 +395,7 @@ curl http://localhost:18080/api/browse/GS
 
 ## Related projects
 
-| Project | Docker Hub |
-|---------|------------|
-| [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) | [`sanjuthomas/sec-edgar-filings-crawler`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-crawler) |
-| [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | [`sanjuthomas/sec-edgar-filings-to-pgvector`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-to-pgvector) |
-| [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant) | [`sanjuthomas/sec-edgar-filings-to-qdrant`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-to-qdrant) |
-| [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | [`sanjuthomas/sec-edgar-filings-semantic-search-ui`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-semantic-search-ui) |
-| [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | [`sanjuthomas/kafka-web-clients`](https://hub.docker.com/r/sanjuthomas/kafka-web-clients) |
+Source repositories, Docker Hub images, and host URLs are listed in [Application coordinates](#application-coordinates). Each sibling project may use a different license — see that repository for details.
 
 ## License
 
