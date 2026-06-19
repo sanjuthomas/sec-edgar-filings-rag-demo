@@ -31,43 +31,73 @@ Persistent data (filings, MongoDB, Kafka, pgvector, Qdrant) is stored in **host 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    SEC["SEC EDGAR"] --> API["sec-edgar-filings-crawler"]
-    API --> Mongo[("MongoDB")]
-    API --> Kafka[["filings topic"]]
-    API --> Disk["EDGAR files on disk"]
+flowchart TB
+    Wiki["Wikipedia<br/>S&P 500 constituents"] --> Crawler["sec-edgar-filings-crawler :18080"]
+    SEC["SEC EDGAR"] --> Crawler
+    Crawler --> Mongo[("MongoDB")]
+    Crawler --> Kafka[["filings topic"]]
+    Crawler --> Disk["EDGAR files on disk"]
 
-    Kafka --> ETL["sec-edgar-filings-to-pgvector"]
+    Kafka --> PgETL["sec-edgar-filings-to-pgvector"]
     Kafka --> QdrantETL["sec-edgar-filings-to-qdrant"]
-    Mongo --> ETL
-    Disk --> ETL
+    Mongo --> PgETL
+    Disk --> PgETL
     Disk --> QdrantETL
-    ETL --> PG[("pgvector")]
-    QdrantETL --> Qdrant[("Qdrant")]
-    PG --> SearchUI["pgvector search UI :18000"]
-    Qdrant --> QdrantSearch["Qdrant search UI :18002"]
-    PG -->|"user choice"| RAG["RAG search UI :18095"]
-    Qdrant -->|"user choice"| RAG
-    Ollama["Ollama on host"] -->|"qwen3:14b or qwen3:30b"| RAG
+
+    subgraph stores["Indexed filings & search"]
+        direction LR
+
+        subgraph pgColumn[" "]
+            direction TB
+            PgSearch["pgvector search UI :18000"]
+            PG[("pgvector")]
+            PgSearch --> PG
+        end
+
+        subgraph ragColumn[" "]
+            direction TB
+            RAG["RAG Search Interface :18095"]
+            Pull["Pull chunks from<br/>selected vector store"]
+            LLM["Ollama LLM<br/>qwen3:14b or qwen3:30b"]
+            Gen["Generate cited answer"]
+            RAG --> Pull
+            Pull --> LLM
+            LLM --> Gen
+            Gen --> RAG
+        end
+
+        subgraph qColumn[" "]
+            direction TB
+            Qdrant[("Qdrant")]
+            QdrantSearch["Qdrant search UI :18002"]
+            Qdrant --> QdrantSearch
+        end
+
+        PG -->|"user choice"| Pull
+        Qdrant -->|"user choice"| Pull
+    end
+
+    PgETL --> PG
+    QdrantETL --> Qdrant
 
     Kafka -.->|debug profile| KWC["kafka-web-clients"]
 ```
 
-**RAG UI choices**
+**RAG Search Interface choices**
 
 | Setting | Options | Default |
 |---------|---------|---------|
 | Vector store | **pgvector** or **Qdrant** | Qdrant |
 | Ollama model | **qwen3:14b** or **qwen3:30b** | qwen3:30b |
 
-Both vector stores are indexed in parallel by the ETL consumers. The RAG UI retrieves from whichever store you select in the dropdown.
+Both vector stores are indexed in parallel by the ETL consumers. The RAG Search Interface retrieves from whichever store you select, sends the chunks to Ollama, and displays the cited answer.
 
 **Data flow**
 
-1. **Crawler Admin** starts a download job; each new filing is registered in MongoDB, written to disk, and published to Kafka.
-2. ETL consumers read the event, read the `.htm` file from the shared EDGAR mount, chunk and embed text, and upsert into pgvector and/or Qdrant (both run in parallel).
+1. **Crawler Admin** refreshes the S&P 500 universe from **Wikipedia** (`refresh_sp500`), then starts a download job; each new filing is registered in MongoDB, written to disk, and published to Kafka.
+2. ETL consumers read the event, read the `.htm` file from the shared EDGAR mount, chunk and embed text, and upsert into pgvector and Qdrant (both run in parallel).
 3. **pgvector Search UI** (`18000`) or **Qdrant Search UI** (`18002`) embeds your question and returns the top matching chunks (verify filing/chunk counts and test retrieval).
-4. **RAG Search UI** (`18095`) embeds your question, retrieves chunks from **pgvector or Qdrant** (your choice), and asks **qwen3:14b or qwen3:30b** on Ollama to synthesize a cited answer.
+4. **RAG Search Interface** (`18095`) embeds your question, **pulls chunks** from **pgvector or Qdrant** (your choice), **sends them to qwen3:14b or qwen3:30b** on Ollama, and **returns the cited answer** to the browser.
 
 ## Prerequisites
 
