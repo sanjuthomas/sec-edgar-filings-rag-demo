@@ -44,41 +44,17 @@ flowchart TB
     Disk --> PgETL
     Disk --> QdrantETL
 
-    subgraph stores["Indexed filings & search"]
-        direction LR
+    PgETL --> PG[("pgvector")]
+    QdrantETL --> Qdrant[("Qdrant")]
 
-        subgraph pgColumn[" "]
-            direction TB
-            PgSearch["pgvector search UI :18000"]
-            PG[("pgvector")]
-            PgSearch --> PG
-        end
+    PG --> PgSearch["pgvector search UI :18000"]
+    Qdrant --> QdrantSearch["Qdrant search UI :18002"]
+    PG -->|"user choice"| RAG["RAG Search Interface :18095"]
+    Qdrant -->|"user choice"| RAG
+    RAG -->|"chunks + question"| Ollama["Ollama on host"]
+    Ollama -->|"cited answer"| RAG
 
-        subgraph ragColumn[" "]
-            direction TB
-            RAG["RAG Search Interface :18095"]
-            Pull["Pull chunks from<br/>selected vector store"]
-            LLM["Ollama LLM<br/>qwen3:14b or qwen3:30b"]
-            Gen["Generate cited answer"]
-            RAG --> Pull
-            Pull --> LLM
-            LLM --> Gen
-            Gen --> RAG
-        end
-
-        subgraph qColumn[" "]
-            direction TB
-            Qdrant[("Qdrant")]
-            QdrantSearch["Qdrant search UI :18002"]
-            Qdrant --> QdrantSearch
-        end
-
-        PG -->|"user choice"| Pull
-        Qdrant -->|"user choice"| Pull
-    end
-
-    PgETL --> PG
-    QdrantETL --> Qdrant
+    PgSearch ~~~ RAG ~~~ QdrantSearch
 
     Kafka -.->|debug profile| KWC["kafka-web-clients"]
 ```
