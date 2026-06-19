@@ -44,26 +44,36 @@ flowchart LR
     Disk --> QdrantETL
     ETL --> PG[("pgvector")]
     QdrantETL --> Qdrant[("Qdrant")]
-    PG --> SearchUI["pgvector search UI"]
-    Qdrant --> QdrantSearch["qdrant search UI"]
-    PG --> UI["RAG search UI"]
-    Ollama["Ollama on host"] --> UI
+    PG --> SearchUI["pgvector search UI :18000"]
+    Qdrant --> QdrantSearch["Qdrant search UI :18002"]
+    PG -->|"user choice"| RAG["RAG search UI :18095"]
+    Qdrant -->|"user choice"| RAG
+    Ollama["Ollama on host"] -->|"qwen3:14b or qwen3:30b"| RAG
 
     Kafka -.->|debug profile| KWC["kafka-web-clients"]
 ```
+
+**RAG UI choices**
+
+| Setting | Options | Default |
+|---------|---------|---------|
+| Vector store | **pgvector** or **Qdrant** | Qdrant |
+| Ollama model | **qwen3:14b** or **qwen3:30b** | qwen3:30b |
+
+Both vector stores are indexed in parallel by the ETL consumers. The RAG UI retrieves from whichever store you select in the dropdown.
 
 **Data flow**
 
 1. **Crawler Admin** starts a download job; each new filing is registered in MongoDB, written to disk, and published to Kafka.
 2. ETL consumers read the event, read the `.htm` file from the shared EDGAR mount, chunk and embed text, and upsert into pgvector and/or Qdrant (both run in parallel).
 3. **pgvector Search UI** (`18000`) or **Qdrant Search UI** (`18002`) embeds your question and returns the top matching chunks (verify filing/chunk counts and test retrieval).
-4. **RAG Search UI** (`18095`) embeds your question, retrieves chunks from the selected vector store (pgvector or Qdrant), and asks Ollama to synthesize a cited answer.
+4. **RAG Search UI** (`18095`) embeds your question, retrieves chunks from **pgvector or Qdrant** (your choice), and asks **qwen3:14b or qwen3:30b** on Ollama to synthesize a cited answer.
 
 ## Prerequisites
 
 - **Docker Desktop** (or Docker Engine + Compose v2)
 - **Apple Silicon / arm64** — all custom images publish `linux/arm64` manifests
-- **Ollama** running on the host with a chat model (UI default: `qwen3:14b`)
+- **Ollama** running on the host with a chat model (`qwen3:14b` or `qwen3:30b`; UI default: `qwen3:30b`)
 
 ```bash
 ollama list
