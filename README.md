@@ -67,6 +67,8 @@ Quick reference for every application in the stack: source repository, published
 
 Compose service names, init jobs, and volume mounts are listed in [Services and ports](#services-and-ports).
 
+Each vector pipeline runs as **four separate containers** — the database, a one-shot init job, a long-running Kafka ETL consumer, and a search API. pgvector and Qdrant pipelines are independent; enable either or both with Compose profiles (see [Running pipelines independently](#running-pipelines-independently)).
+
 ## Architecture
 
 ```mermaid
@@ -314,6 +316,42 @@ Filing metadata in MongoDB stores `local_path` values under `/data/edgar/...` (t
 
 Set paths in `.env` or export them before `docker compose up`. Relative paths are resolved from the directory containing `docker-compose.yml`. Directories are created automatically when the stack starts — no manual `mkdir` required.
 
+## Running pipelines independently
+
+pgvector and Qdrant are **already separate containers** — not bundled into a single ETL image. Each pipeline has its own database, init job, Kafka consumer, and search API:
+
+| Pipeline | Database | Init | ETL consumer | Search API |
+|----------|----------|------|--------------|------------|
+| **pgvector** | `pgvector` | `init-db` | `sec-edgar-filings-to-pgvector` | `sec-edgar-filings-to-pgvector-search` |
+| **Qdrant** | `qdrant` | `init-qdrant` | `sec-edgar-filings-to-qdrant` | `sec-edgar-filings-to-qdrant-search` |
+
+Both ETL consumers read the same Kafka `filings` topic but use **different consumer groups** (`edgar-pgvector-etl` and `edgar-qdrant-etl`), so they progress independently.
+
+Enable pipelines with Compose profiles (set in `.env` as `COMPOSE_PROFILES` or pass on the command line):
+
+```bash
+# Full demo (default in .env.example) — both pipelines + RAG UI
+COMPOSE_PROFILES=pgvector,qdrant,rag docker compose up -d
+
+# pgvector only — DB + ETL + search on 18000; crawler + Kafka still start
+docker compose --profile pgvector up -d
+
+# Qdrant only — DB + ETL + search on 18002
+docker compose --profile qdrant up -d
+```
+
+The RAG UI (`18095`) uses the `rag` profile and requires **both** `pgvector` and `qdrant` profiles because it can query either vector store.
+
+Restart or recreate a single ETL consumer without touching the other pipeline:
+
+```bash
+docker compose pull sec-edgar-filings-to-pgvector
+docker compose up -d --no-deps --force-recreate sec-edgar-filings-to-pgvector
+
+docker compose pull sec-edgar-filings-to-qdrant
+docker compose up -d --no-deps --force-recreate sec-edgar-filings-to-qdrant
+```
+
 ## Configuration
 
 Copy `.env.example` to `.env` and edit as needed:
@@ -327,6 +365,9 @@ MONGO_HOST_PATH=./sec-edgar/mongo-data
 KAFKA_HOST_PATH=./sec-edgar/kafka-data
 PGVECTOR_HOST_PATH=./sec-edgar/pgvector-data
 QDRANT_HOST_PATH=./sec-edgar/qdrant-data
+
+# Full demo: pgvector + Qdrant + RAG UI; use pgvector or qdrant for one pipeline only
+COMPOSE_PROFILES=pgvector,qdrant,rag
 ```
 
 The SEC requires a descriptive `User-Agent` on every programmatic request. A placeholder is used if unset, which may lead to throttling.

@@ -9,8 +9,13 @@
 #   - Ollama running on the host (http://localhost:11434)
 #   - SEC_USER_AGENT set in .env
 #
-# Start the full stack:
+# Start the full stack (both vector pipelines + RAG UI):
 #   docker compose up -d
+#   # or explicitly: docker compose --profile pgvector --profile qdrant --profile rag up -d
+#
+# Start one pipeline only (no RAG UI — it needs both vector stores):
+#   docker compose --profile pgvector up -d
+#   docker compose --profile qdrant up -d
 #
 # Include Kafka debug UI (host port 18081):
 #   docker compose --profile debug up -d
@@ -109,9 +114,10 @@ services:
       kafka:
         condition: service_healthy
 
-  # --- 2. sec-edgar-filings-to-pgvector (pgvector + Kafka consumer / ETL) ---
+  # --- 2. pgvector pipeline (DB, init, ETL consumer, search — separate containers) ---
 
   pgvector:
+    profiles: ["pgvector"]
     image: pgvector/pgvector:pg17
     restart: unless-stopped
     depends_on:
@@ -153,6 +159,7 @@ services:
       ]
 
   init-db:
+    profiles: ["pgvector"]
     image: pgvector/pgvector:pg17
     restart: "no"
     depends_on:
@@ -178,6 +185,7 @@ services:
       ]
 
   sec-edgar-filings-to-pgvector:
+    profiles: ["pgvector"]
     image: sanjuthomas/sec-edgar-filings-to-pgvector:latest
     restart: unless-stopped
     cpus: 8
@@ -210,6 +218,7 @@ services:
       - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar:ro
 
   sec-edgar-filings-to-pgvector-search:
+    profiles: ["pgvector"]
     image: sanjuthomas/sec-edgar-filings-to-pgvector:latest
     restart: unless-stopped
     depends_on:
@@ -225,9 +234,10 @@ services:
       - "18000:8000"
     command: ["edgar-etl", "serve", "--host", "0.0.0.0", "--port", "8000"]
 
-  # --- 3. sec-edgar-filings-to-qdrant (Qdrant + Kafka consumer / ETL) ---
+  # --- 3. Qdrant pipeline (DB, init, ETL consumer, search — separate containers) ---
 
   qdrant:
+    profiles: ["qdrant"]
     image: qdrant/qdrant:latest
     restart: unless-stopped
     depends_on:
@@ -250,6 +260,7 @@ services:
       start_period: 10s
 
   init-qdrant:
+    profiles: ["qdrant"]
     image: sanjuthomas/sec-edgar-filings-to-qdrant:latest
     restart: "no"
     depends_on:
@@ -261,6 +272,7 @@ services:
     entrypoint: ["edgar-etl", "init-collection"]
 
   sec-edgar-filings-to-qdrant:
+    profiles: ["qdrant"]
     image: sanjuthomas/sec-edgar-filings-to-qdrant:latest
     restart: unless-stopped
     cpus: 8
@@ -289,6 +301,7 @@ services:
       - ${EDGAR_HOST_PATH:-./sec-edgar/filings-data}:/data/edgar:ro
 
   sec-edgar-filings-to-qdrant-search:
+    profiles: ["qdrant"]
     image: sanjuthomas/sec-edgar-filings-to-qdrant:latest
     restart: unless-stopped
     depends_on:
@@ -308,6 +321,7 @@ services:
   # --- 4. semantic search UI (pgvector or Qdrant + Ollama on host) ---
 
   sec-edgar-filings-semantic-search-ui:
+    profiles: ["rag"]
     image: sanjuthomas/sec-edgar-filings-semantic-search-ui:latest
     restart: unless-stopped
     ports:
