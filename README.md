@@ -2,7 +2,7 @@
 
 > **Ask natural-language questions over real SEC filings** — downloaded from EDGAR, embedded into pgvector, and answered with citations via a local Ollama LLM.
 
-Docker Compose orchestration for an end-to-end retrieval-augmented generation (RAG) pipeline. Five published images are wired together: a filings downloader, Kafka-driven ETL consumers for pgvector and Qdrant, semantic search web UIs, and an optional Kafka debug tool.
+Docker Compose orchestration for an end-to-end retrieval-augmented generation (RAG) pipeline. Published images are wired together: a filings downloader, Kafka-driven ETL consumers for pgvector and Qdrant, chunk search APIs, a multi-turn chat UI, and an optional Kafka debug tool.
 
 This repo contains **no application source code** — only Compose wiring, environment templates, and documentation. Licensed under the [MIT License](LICENSE).
 
@@ -14,7 +14,7 @@ SEC annual and quarterly reports (10-K, 10-Q) are rich sources of corporate info
 2. **Indexing** filing text as vector embeddings in PostgreSQL with pgvector
 3. **Querying** with semantic search and generating grounded answers that cite the source passages
 
-All heavy lifting lives in sibling repositories ([sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant), [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui), [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients)). **This repository is the glue** — one `docker compose up` to run the full stack with Docker and Ollama installed locally. See [Application coordinates](#application-coordinates) for repos, images, and URLs.
+All heavy lifting lives in sibling repositories ([sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler), [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector), [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant), [sec-edgar-filings-chat](https://github.com/sanjuthomas/sec-edgar-filings-chat), [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients)). **This repository is the glue** — one `docker compose up` to run the full stack with Docker and Ollama installed locally. See [Application coordinates](#application-coordinates) for repos, images, and URLs.
 
 Persistent data (filings, MongoDB, Kafka, pgvector, Qdrant) is stored in **host directories you choose** (defaults to `./sec-edgar/` under this repo). The LLM runs on the host via Ollama, not in a container.
 
@@ -23,9 +23,9 @@ Persistent data (filings, MongoDB, Kafka, pgvector, Qdrant) is stored in **host 
 | Step | Component | Role |
 |------|-----------|------|
 | 1 | [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) | Crawler **Admin** + **Browse** UIs and REST API on **18080**; downloads filings, stores metadata in MongoDB, writes `.htm` files to disk, publishes Kafka events |
-| 2 | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | Consumes the `filings` Kafka topic, reads filing content from disk, generates embeddings, loads pgvector; **Search UI** on port **18000** (chunk retrieval, no LLM) |
-| 2b | [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant) | Same Kafka pipeline into Qdrant; **Search UI** on **18002**, **Qdrant dashboard** on **16333** (chunk retrieval, no LLM) |
-| 3 | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | RAG search + cited answers over **pgvector** or **Qdrant** (selectable in UI), using Ollama on your Mac for generation (**18095**) |
+| 2 | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | **ETL admin** on **18001** (start Kafka consumer from UI), embeds with **BGE-M3**, loads ParadeDB/pgvector + BM25; **Search UI** on **18000** |
+| 2b | [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant) | **ETL admin** on **18003**, same Kafka pipeline into Qdrant (dense + BM25); **Search UI** on **18002**, **Qdrant dashboard** on **16333** |
+| 3 | [sec-edgar-filings-chat](https://github.com/sanjuthomas/sec-edgar-filings-chat) | Multi-turn chat + cited answers over **pgvector** or **Qdrant** (selectable in UI); query embeddings and LLM via **Ollama on your Mac** (**18095**) |
 | 4 | [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | Optional browser UI to inspect Kafka messages (debug) |
 
 ## Application coordinates
@@ -37,11 +37,11 @@ Quick reference for every application in the stack: source repository, published
 | Service | GitHub | Docker image | Host URL |
 |---------|--------|--------------|----------|
 | **Crawler** (Admin + Browse) | [sec-edgar-filings-crawler](https://github.com/sanjuthomas/sec-edgar-filings-crawler) | [`sanjuthomas/sec-edgar-filings-crawler:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-crawler) | http://localhost:18080 |
-| **pgvector ETL** | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | [`sanjuthomas/sec-edgar-filings-to-pgvector:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-to-pgvector) | *(no host port — Kafka consumer)* |
+| **pgvector ETL** | [sec-edgar-filings-to-pgvector](https://github.com/sanjuthomas/sec-edgar-filings-to-pgvector) | [`sanjuthomas/sec-edgar-filings-to-pgvector:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-to-pgvector) | http://localhost:18001 (ETL admin — start Kafka consumer from UI) |
 | **pgvector Search** | same repo | same image (`edgar-etl serve`) | http://localhost:18000 |
-| **Qdrant ETL** | [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant) | [`sanjuthomas/sec-edgar-filings-to-qdrant:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-to-qdrant) | *(no host port — Kafka consumer)* |
+| **Qdrant ETL** | [sec-edgar-filings-to-qdrant](https://github.com/sanjuthomas/sec-edgar-filings-to-qdrant) | [`sanjuthomas/sec-edgar-filings-to-qdrant:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-to-qdrant) | http://localhost:18003 (ETL admin — start Kafka consumer from UI) |
 | **Qdrant Search** | same repo | same image (`edgar-etl serve`) | http://localhost:18002 |
-| **RAG UI** | [sec-edgar-filings-semantic-search-ui](https://github.com/sanjuthomas/sec-edgar-filings-semantic-search-ui) | [`sanjuthomas/sec-edgar-filings-semantic-search-ui:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-semantic-search-ui) | http://localhost:18095 |
+| **Chat UI** | [sec-edgar-filings-chat](https://github.com/sanjuthomas/sec-edgar-filings-chat) | [`sanjuthomas/sec-edgar-filings-chat:latest`](https://hub.docker.com/r/sanjuthomas/sec-edgar-filings-chat) | http://localhost:18095 |
 | **Kafka debug UI** *(optional, `--profile debug`)* | [kafka-web-clients](https://github.com/sanjuthomas/kafka-web-clients) | [`sanjuthomas/kafka-web-clients:latest`](https://hub.docker.com/r/sanjuthomas/kafka-web-clients) | http://localhost:18081 |
 
 ### Orchestration
@@ -56,18 +56,18 @@ Quick reference for every application in the stack: source repository, published
 |---------|-------|-------------|
 | MongoDB | `mongo:7` | `localhost:10017` |
 | Kafka | `apache/kafka:3.9.0` | `localhost:10092` |
-| pgvector DB | `pgvector/pgvector:pg17` | `localhost:10432` (database `edgar`, user/password `postgres`) |
-| Qdrant | `qdrant/qdrant:latest` | REST http://localhost:16333, gRPC `16334`, dashboard http://localhost:16333/dashboard |
+| pgvector DB | `paradedb/paradedb:latest-pg17` (pgvector + pg_search BM25) | `localhost:10432` (database `edgar`, user/password `postgres`) |
+| Qdrant | `qdrant/qdrant:v1.18.2` | REST http://localhost:16333, gRPC `16334`, dashboard http://localhost:16333/dashboard |
 
 ### External dependency
 
 | Service | URL |
 |---------|-----|
-| **Ollama** (host, for RAG answer generation) | http://localhost:11434 |
+| **Ollama** (host — query embeddings `bge-m3` + chat models) | http://localhost:11434 |
 
 Compose service names, init jobs, and volume mounts are listed in [Services and ports](#services-and-ports).
 
-Each vector pipeline runs as **four separate containers** — the database, a one-shot init job, a long-running Kafka ETL consumer, and a search API. pgvector and Qdrant pipelines are independent; enable either or both with Compose profiles (see [Running pipelines independently](#running-pipelines-independently)).
+Each vector pipeline runs as **four separate containers** — the database, a one-shot init job, a long-running ETL service (`edgar-etl standby` with admin UI on **18001** / **18003**), and a search API. Embeddings use **BGE-M3** (1024 dimensions). Start Kafka ingestion from each ETL admin UI after the stack is up. pgvector and Qdrant pipelines are independent; enable either or both with Compose profiles (see [Running pipelines independently](#running-pipelines-independently)).
 
 ## Architecture
 
@@ -91,40 +91,42 @@ flowchart TB
     PG ~~~ Qdrant
 
     PG --> PgSearch["pgvector search UI :18000"]
-    PG -->|"user choice"| RAG["RAG Search Interface :18095"]
-    Qdrant -->|"user choice"| RAG
+    PG -->|"user choice"| Chat["Chat UI :18095"]
+    Qdrant -->|"user choice"| Chat
     Qdrant --> QdrantSearch["Qdrant search UI :18002"]
-    RAG -->|"chunks + question"| Ollama["Ollama on host"]
-    Ollama -->|"cited answer"| RAG
+    Chat -->|"chunks + question"| Ollama["Ollama on host"]
+    Ollama -->|"cited answer"| Chat
 
-    PgSearch ~~~ RAG ~~~ Qdrant
+    PgSearch ~~~ Chat ~~~ Qdrant
 
     Kafka -.->|debug profile| KWC["kafka-web-clients"]
 ```
 
-**RAG Search Interface choices**
+**Chat UI choices**
 
 | Setting | Options | Default |
 |---------|---------|---------|
-| Vector store | **pgvector** or **Qdrant** | Qdrant |
-| Ollama model | **qwen3:14b** or **qwen3:30b** | qwen3:30b |
+| Vector store | **pgvector** or **Qdrant** | pgvector |
+| Ollama chat model | User-selectable (e.g. **qwen3:14b**, **qwen3:30b**) | qwen3:30b |
+| Query embeddings | **bge-m3** via Ollama on host | bge-m3 |
 
-Both vector stores are indexed in parallel by the ETL consumers. The RAG Search Interface retrieves from whichever store you select, sends the chunks to Ollama, and displays the cited answer.
+Both vector stores are indexed in parallel by the ETL consumers. The chat UI retrieves from whichever store you select, sends the chunks to Ollama, and displays a cited answer in a multi-turn conversation.
 
 **Data flow**
 
 1. **Crawler Admin** refreshes the S&P 500 universe from **Wikipedia** (`refresh_sp500`), then starts a download job; each new filing is registered in MongoDB, written to disk, and published to Kafka.
-2. ETL consumers read the event, read the `.htm` file from the shared EDGAR mount, chunk and embed text, and upsert into pgvector and Qdrant (both run in parallel).
+2. From each **ETL admin UI** (**18001** pgvector, **18003** Qdrant), start the Kafka consumer. Each consumer reads the event, reads the `.htm` file from the shared EDGAR mount, chunks and embeds with **BGE-M3**, and upserts into pgvector and Qdrant (both run in parallel when both are enabled).
 3. **pgvector Search UI** (`18000`) or **Qdrant Search UI** (`18002`) embeds your question and returns the top matching chunks (verify filing/chunk counts and test retrieval).
-4. **RAG Search Interface** (`18095`) embeds your question, **pulls chunks** from **pgvector or Qdrant** (your choice), **sends them to qwen3:14b or qwen3:30b** on Ollama, and **returns the cited answer** to the browser.
+4. **Chat UI** (`18095`) embeds your question with **bge-m3** on Ollama, **pulls chunks** from **pgvector or Qdrant** (your choice), **sends them to a chat model** on Ollama, and **returns the cited answer** in the browser.
 
 ## Prerequisites
 
 - **Docker Desktop** (or Docker Engine + Compose v2)
 - **Apple Silicon / arm64** — all custom images publish `linux/arm64` manifests
-- **Ollama** running on the host with a chat model (`qwen3:14b` or `qwen3:30b`; UI default: `qwen3:30b`)
+- **Ollama** running on the host with **`bge-m3`** (query embeddings) and a chat model (`qwen3:14b` or `qwen3:30b`; UI default: `qwen3:30b`)
 
 ```bash
+ollama pull bge-m3
 ollama list
 ```
 
@@ -169,10 +171,12 @@ curl http://localhost:18080/health
 |----|-----|---------|
 | **Crawler Admin** | http://localhost:18080/ | Start and monitor SEC filing download jobs |
 | **Crawler Browse** | http://localhost:18080/browse | Inspect downloaded metadata and on-disk files by ticker |
-| **pgvector Search** | http://localhost:18000 | Semantic search over embedded chunks in pgvector; filing/chunk stats; top-K passages (no LLM) |
-| **Qdrant Search** | http://localhost:18002 | Semantic search over embedded chunks in Qdrant; filing/chunk stats; top-K passages (no LLM) |
+| **pgvector ETL admin** | http://localhost:18001 | Start/stop Kafka consumer, truncate index, embedding backend |
+| **pgvector Search** | http://localhost:18000 | Hybrid dense + BM25 search over embedded chunks in ParadeDB/pgvector |
+| **Qdrant ETL admin** | http://localhost:18003 | Start/stop Kafka consumer, truncate index, embedding backend |
+| **Qdrant Search** | http://localhost:18002 | Hybrid dense + BM25 search over embedded chunks in Qdrant |
 | **Qdrant dashboard** | http://localhost:16333/dashboard | Inspect `filing_chunks` collection, points, and indexes |
-| **RAG Search** | http://localhost:18095 | Semantic search and cited answers; choose **pgvector** or **Qdrant** in the UI (requires Ollama on host) |
+| **Chat UI** | http://localhost:18095 | Multi-turn chat with cited answers; choose **pgvector** or **Qdrant** in the UI (requires Ollama on host) |
 | **Kafka debug** | http://localhost:18081 | Inspect `filings` topic messages (`debug` profile only) |
 
 See [Crawler UI](#crawler-ui) below for Admin and Browse details.
@@ -251,7 +255,7 @@ docker compose logs -f sec-edgar-filings-to-pgvector
 
 6. Open **http://localhost:18000** (pgvector Search) or **http://localhost:18002** (Qdrant Search) to confirm filing/chunk counts and try semantic search
 7. Open **http://localhost:16333/dashboard** (Qdrant dashboard) to inspect stored vectors
-8. Open **http://localhost:18095** (RAG Search) for a full cited answer (requires Ollama)
+8. Open **http://localhost:18095** (Chat UI) for a full cited answer (requires Ollama with `bge-m3` on host)
 
 ### Option B — CLI
 
@@ -284,33 +288,37 @@ Optional filters: ticker (`GS`), form type (`10-K`).
 | Compose service | Image | Host port | Notes |
 |-----------------|-------|-----------|-------|
 | `init-dirs` | `alpine:3.21` | — | Creates host data directories on first start |
-| `init-db` | `pgvector/pgvector:pg17` | — | Creates pgvector tables on first start (`sql/001_init.sql`) |
+| `pgvector-init` | `paradedb/paradedb:latest-pg17` | — | Applies pgvector schema + pg_search BM25 (`sql/001_init.sql`, `sql/003_paradedb_pgsearch.sql`) |
 | `init-qdrant` | `sanjuthomas/sec-edgar-filings-to-qdrant:latest` | — | Creates Qdrant `filing_chunks` collection on first start |
 | `sec-edgar-filings-crawler` | `sanjuthomas/sec-edgar-filings-crawler:latest` | **18080** | Crawler Admin UI, Browse UI, REST API |
 | `mongo` | `mongo:7` | **10017** | Filing metadata |
 | `kafka` | `apache/kafka:3.9.0` | **10092** | `filings` topic |
-| `pgvector` | `pgvector/pgvector:pg17` | **10432** | DB `edgar`, user `postgres` |
-| `qdrant` | `qdrant/qdrant:latest` | **16333** (REST), **16334** (gRPC) | Vector store; dashboard at `/dashboard` |
-| `sec-edgar-filings-to-pgvector` | `sanjuthomas/sec-edgar-filings-to-pgvector:latest` | — | Kafka consumer / ETL → pgvector |
-| `sec-edgar-filings-to-pgvector-search` | `sanjuthomas/sec-edgar-filings-to-pgvector:latest` | **18000** | pgvector semantic search UI + JSON API (`edgar-etl serve`) |
-| `sec-edgar-filings-to-qdrant` | `sanjuthomas/sec-edgar-filings-to-qdrant:latest` | — | Kafka consumer / ETL → Qdrant |
+| `pgvector` | `paradedb/paradedb:latest-pg17` | **10432** | DB `edgar`, user `postgres`; pg_search BM25 |
+| `qdrant` | `qdrant/qdrant:v1.18.2` | **16333** (REST), **16334** (gRPC) | Vector store; dashboard at `/dashboard` |
+| `sec-edgar-filings-to-pgvector` | `sanjuthomas/sec-edgar-filings-to-pgvector:latest` | **18001** | ETL admin (`edgar-etl standby`); start Kafka consumer from UI |
+| `sec-edgar-filings-to-pgvector-search` | `sanjuthomas/sec-edgar-filings-to-pgvector:latest` | **18000** | pgvector hybrid search UI + JSON API (`edgar-etl serve`) |
+| `sec-edgar-filings-to-qdrant` | `sanjuthomas/sec-edgar-filings-to-qdrant:latest` | **18003** | ETL admin (`edgar-etl standby`); start Kafka consumer from UI |
 | `sec-edgar-filings-to-qdrant-search` | `sanjuthomas/sec-edgar-filings-to-qdrant:latest` | **18002** | Qdrant semantic search UI + JSON API (`edgar-etl serve`) |
-| `sec-edgar-filings-semantic-search-ui` | `sanjuthomas/sec-edgar-filings-semantic-search-ui:latest` | **18095** | RAG search UI (pgvector or Qdrant + Ollama answers) |
+| `sec-edgar-filings-chat` | `sanjuthomas/sec-edgar-filings-chat:latest` | **18095** | Chat UI (pgvector or Qdrant + Ollama on host) |
 | `kafka-web-clients` | `sanjuthomas/kafka-web-clients:latest` | **18081** | Debug only (`debug` profile) |
 
 Containers talk to each other on the default internal ports (for example `mongo:27017`, `kafka:9092`). Host ports above are only for access from your machine.
 
-Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB/Kafka/pgvector/Qdrant become healthy, `init-db` and `init-qdrant` apply schemas/collections, then the filings crawler, ETL consumers, search UIs, and RAG UI start.
+Startup order is enforced with healthchecks: `init-dirs` creates data directories, then MongoDB/Kafka/pgvector/Qdrant become healthy, `pgvector-init` and `init-qdrant` apply schemas/collections, then the filings crawler, ETL standby services, search UIs, and chat UI start.
 
 Host paths are configured with environment variables. Defaults are under `./sec-edgar/` in this repo.
 
+**`SEC_EDGAR_DOCUMENT_ROOT`** is the host directory for filing `.htm` files. In this demo stack it is set via `EDGAR_HOST_PATH` (default `./sec-edgar/filings-data`, mounted in containers as `/data/edgar`).
+
 | Variable | Default | Mounted in container as | Used by |
 |----------|---------|-------------------------|---------|
-| `EDGAR_HOST_PATH` | `./sec-edgar/filings-data` | `/data/edgar` | Filing `.htm` files (read-write for downloader, read-only for ETL) |
+| `EDGAR_HOST_PATH` | `./sec-edgar/filings-data` | `/data/edgar` | Filing `.htm` files — same as `SEC_EDGAR_DOCUMENT_ROOT` in the all-in-one demo |
 | `MONGO_HOST_PATH` | `./sec-edgar/mongo-data` | `/data/db` | MongoDB data |
 | `KAFKA_HOST_PATH` | `./sec-edgar/kafka-data` | `/tmp/kraft-combined-logs` | Kafka broker logs |
 | `PGVECTOR_HOST_PATH` | `./sec-edgar/pgvector-data` | `/var/lib/postgresql/data` | PostgreSQL / pgvector data |
 | `QDRANT_HOST_PATH` | `./sec-edgar/qdrant-data` | `/qdrant/storage` | Qdrant vector store data |
+| `HF_CACHE_HOST_PATH` | `./sec-edgar/hf-cache` | `/cache/huggingface` | Shared BGE-M3 model cache (ETL + search) |
+| `CONFIG_HOST_PATH` | `./config` | `/app/config` | Shared `embedding-backend.json` (embedded vs Ollama) |
 
 Filing metadata in MongoDB stores `local_path` values under `/data/edgar/...` (the in-container mount). Both the downloader and ETL use that same container path, so your host path can be anywhere.
 
@@ -318,11 +326,11 @@ Set paths in `.env` or export them before `docker compose up`. Relative paths ar
 
 ## Running pipelines independently
 
-pgvector and Qdrant are **already separate containers** — not bundled into a single ETL image. Each pipeline has its own database, init job, Kafka consumer, and search API:
+pgvector and Qdrant are **already separate containers** — not bundled into a single ETL image. Each pipeline has its own database, init job, ETL standby service (admin UI), and search API:
 
 | Pipeline | Database | Init | ETL consumer | Search API |
 |----------|----------|------|--------------|------------|
-| **pgvector** | `pgvector` | `init-db` | `sec-edgar-filings-to-pgvector` | `sec-edgar-filings-to-pgvector-search` |
+| **pgvector** | `pgvector` | `pgvector-init` | `sec-edgar-filings-to-pgvector` | `sec-edgar-filings-to-pgvector-search` |
 | **Qdrant** | `qdrant` | `init-qdrant` | `sec-edgar-filings-to-qdrant` | `sec-edgar-filings-to-qdrant-search` |
 
 Both ETL consumers read the same Kafka `filings` topic but use **different consumer groups** (`edgar-pgvector-etl` and `edgar-qdrant-etl`), so they progress independently.
@@ -330,7 +338,7 @@ Both ETL consumers read the same Kafka `filings` topic but use **different consu
 Enable pipelines with Compose profiles (set in `.env` as `COMPOSE_PROFILES` or pass on the command line):
 
 ```bash
-# Full demo (default in .env.example) — both pipelines + RAG UI
+# Full demo (default in .env.example) — both pipelines + chat UI
 COMPOSE_PROFILES=pgvector,qdrant,rag docker compose up -d
 
 # pgvector only — DB + ETL + search on 18000; crawler + Kafka still start
@@ -340,7 +348,7 @@ docker compose --profile pgvector up -d
 docker compose --profile qdrant up -d
 ```
 
-The RAG UI (`18095`) uses the `rag` profile and requires **both** `pgvector` and `qdrant` profiles because it can query either vector store.
+The chat UI (`18095`) uses the `rag` profile and requires **both** `pgvector` and `qdrant` profiles because it can query either vector store.
 
 Restart or recreate a single ETL consumer without touching the other pipeline:
 
@@ -365,16 +373,18 @@ MONGO_HOST_PATH=./sec-edgar/mongo-data
 KAFKA_HOST_PATH=./sec-edgar/kafka-data
 PGVECTOR_HOST_PATH=./sec-edgar/pgvector-data
 QDRANT_HOST_PATH=./sec-edgar/qdrant-data
+HF_CACHE_HOST_PATH=./sec-edgar/hf-cache
+CONFIG_HOST_PATH=./config
 
-# Full demo: pgvector + Qdrant + RAG UI; use pgvector or qdrant for one pipeline only
+# Full demo: pgvector + Qdrant + chat UI; use pgvector or qdrant for one pipeline only
 COMPOSE_PROFILES=pgvector,qdrant,rag
 ```
 
 The SEC requires a descriptive `User-Agent` on every programmatic request. A placeholder is used if unset, which may lead to throttling.
 
-Ollama is **not** started by this compose file. The RAG UI reaches it at `http://host.docker.internal:11434` (your local Ollama install).
+Ollama is **not** started by this compose file. The chat UI reaches it at `http://host.docker.internal:11434` (your local Ollama install). Pull **`bge-m3`** for query embeddings plus a chat model before searching.
 
-The RAG UI connects to **pgvector** via `SPRING_DATASOURCE_URL` and to **Qdrant** via `APP_VECTORSTORES_QDRANT_URL` (`http://qdrant:6333` on the Compose network). Use the **Vector store** dropdown at http://localhost:18095 to switch between them. Host port **16333** is only for the Qdrant dashboard from your machine — containers use `qdrant:6333`.
+The chat UI connects to **pgvector** at `pgvector:5432` and to **Qdrant** at `http://qdrant:6333` on the Compose network. Use the **Vector store** dropdown at http://localhost:18095 to switch between them. Host port **16333** is only for the Qdrant dashboard from your machine — containers use `qdrant:6333`.
 
 ## Kafka debug UI
 
@@ -431,7 +441,7 @@ curl http://localhost:18080/api/browse/GS
 | ETL skips filings | File exists at `local_path` from MongoDB under `/data/edgar` inside containers? |
 | UI returns no results | Chunks loaded? Check http://localhost:18000/api/stats (pgvector) or http://localhost:18002/api/stats (Qdrant); see ETL logs |
 | Qdrant dashboard empty | Check http://localhost:16333/dashboard; confirm `sec-edgar-filings-to-qdrant` logs show successful upserts |
-| UI errors on answer generation | Ollama running? `curl http://localhost:11434/api/tags` |
+| UI errors on answer generation | Ollama running? `ollama pull bge-m3` and a chat model; `curl http://localhost:11434/api/tags` |
 | Kafka debug can't connect | From debug container use `kafka:9092`; from host use `localhost:10092` |
 
 ## Related projects

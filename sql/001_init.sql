@@ -1,4 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_search;
 
 CREATE TABLE IF NOT EXISTS filings (
     accession_number TEXT PRIMARY KEY,
@@ -20,7 +21,7 @@ CREATE TABLE IF NOT EXISTS filing_chunks (
     accession_number TEXT NOT NULL REFERENCES filings(accession_number) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding vector(384) NOT NULL,
+    embedding vector(1024) NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}',
     UNIQUE (accession_number, chunk_index)
 );
@@ -30,3 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_filing_chunks_metadata ON filing_chunks USING gin
 
 CREATE INDEX IF NOT EXISTS idx_filing_chunks_embedding
     ON filing_chunks USING hnsw (embedding vector_cosine_ops);
+
+CREATE INDEX IF NOT EXISTS idx_filing_chunks_bm25 ON filing_chunks
+USING bm25 (id, content, metadata, accession_number, chunk_index)
+WITH (key_field = 'id');
